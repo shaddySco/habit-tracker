@@ -45,32 +45,68 @@ export default function Daily({ state, dispatch, showToast }) {
     const p = state.partners[catId] || {}
     if (!p.email) { showToast("Please enter your partner's email first"); return }
     const cat = state.cats.find(c => c.id === catId)
-    const habitsList = cat.habits.length > 0 
-      ? cat.habits.map(h => `- ${h.text} (${h.freq})`).join('\n') 
-      : 'No goals set yet.'
-    const subject = `Accountability Partner Request from ${state.username || 'your friend'}`
-    const body = `Hey ${p.name || 'friend'},
+    const username = state.username || 'Your friend'
 
-I'm focusing on my ${catLabel} goals this year, and I'd love for you to be my accountability partner!
+    const daily = cat.habits.filter(h => h.freq === 'daily')
+    const weekly = cat.habits.filter(h => h.freq === 'weekly')
+    const monthly = cat.habits.filter(h => h.freq === 'monthly')
 
-If you accept, your task would be to check in with me weekly and help me stay on track. Here are the goals you'd be helping me achieve:
+    const formatSection = (label, habits) =>
+      habits.length ? `  [${label}]\n${habits.map(h => `    • ${h.text}`).join('\n')}` : ''
 
+    const goalSections = [
+      formatSection('Daily', daily),
+      formatSection('Weekly', weekly),
+      formatSection('Monthly', monthly),
+    ].filter(Boolean).join('\n\n')
+
+    const habitsList = goalSections || '  No goals set yet.'
+
+    const subject = `${username} is inviting you to be their Accountability Partner — ${catLabel}`
+    const body = `Hey ${p.name || 'there'},
+
+I'm reaching out because I trust you and believe you can help me grow.
+
+I'm committed to levelling up my ${catLabel} in 2026, and I'd love for you to be my accountability partner in this area.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT DOES THIS MEAN?
+━━━━━━━━━━━━━━━━━━━━━━━━
+As my accountability partner, your role would be to:
+  ✅ Check in with me once a week (a quick message is enough)
+  ✅ Ask me how my goals are going — honestly
+  ✅ Encourage me when I'm consistent, challenge me when I'm not
+  ✅ Receive a weekly progress report from my habit tracker
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+GOALS YOU'D BE HELPING ME ACHIEVE (${catLabel.toUpperCase()})
+━━━━━━━━━━━━━━━━━━━━━━━━
 ${habitsList}
 
-Would you be up for this?
+━━━━━━━━━━━━━━━━━━━━━━━━
+IF YOU ACCEPT
+━━━━━━━━━━━━━━━━━━━━━━━━
+Simply reply to this email with "I'm in!" and I will set up a weekly Google Calendar reminder so you never forget to check in.
 
-Thanks,
-${state.username || 'Your friend'}
+This means a lot to me — having someone in my corner will make a real difference. No pressure, but I truly hope you'll say yes.
+
+With gratitude,
+${username} 🙏
+
+---
+P.S. Once the weekly reminder is set up, you'll receive a progress summary for my ${catLabel} goals every week automatically. Your check-ins will help keep me honest and consistent throughout 2026!
 `
-    window.open(`mailto:${p.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`)
-    showToast('Drafting intro email...')
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(p.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    window.open(gmailUrl, '_blank')
+    showToast(`✉️ Gmail compose opened for ${p.name || 'your partner'}!`)
   }
 
   const scheduleReminder = (catId, catLabel) => {
     const p = state.partners[catId] || {}
     if (!p.email) { showToast("Please enter your partner's Gmail first"); return }
-    const title = `[${catLabel}] Weekly accountability check-in`
-    const details = `Hey ${p.name || 'friend'}!\n\nThis is your weekly reminder to check in on ${state.username || "your accountability partner"}'s ${catLabel} goals.\n\nPlease reach out and encourage them this week!`
+    const username = state.username || 'your accountability partner'
+    const title = `[${catLabel}] Weekly accountability check-in — ${username}`
+    const details = `Hey ${p.name || 'friend'}!\n\nThis is your weekly reminder to check in on ${username}'s ${catLabel} goals.\n\nPlease reach out and encourage them this week!`
     const now = new Date(); const s = new Date(now); s.setHours(9, 0, 0, 0)
     const e2 = new Date(s); e2.setHours(9, 30, 0, 0)
     const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
@@ -257,9 +293,24 @@ ${state.username || 'Your friend'}
                     id={`pe-${cat.id}`} />
                 </div>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0 }} onClick={() => sendIntroEmail(cat.id, cat.label)}>✉️ Send Intro Email</button>
-                  <button className="cal-btn" style={{ flex: 1, margin: 0 }} onClick={() => scheduleReminder(cat.id, cat.label)}>📅 Set Weekly Reminder</button>
+                  <button
+                    className="cal-btn"
+                    style={{ flex: 1, backgroundColor: '#10b981', margin: 0 }}
+                    onClick={() => sendIntroEmail(cat.id, cat.label)}
+                  >
+                    ✉️ Send Intro Email
+                  </button>
+                  <button
+                    className="cal-btn"
+                    style={{ flex: 1, margin: 0 }}
+                    onClick={() => scheduleReminder(cat.id, cat.label)}
+                  >
+                    📅 Set Weekly Reminder
+                  </button>
                 </div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+                  💡 <strong>Step 1:</strong> Send the intro email first — your partner will see your name, their role, and all the goals they'd be supporting. <strong>Step 2:</strong> Once they accept, set the weekly reminder so they never miss a check-in.
+                </p>
               </div>
             </div>
           </div>
