@@ -216,7 +216,7 @@ export default function App() {
         {tab === 'monthly' && <Monthly {...pageProps} />}
         {tab === 'vision' && <Vision {...pageProps} />}
         {tab === 'milestones' && <Milestones {...pageProps} />}
-        {tab === 'wisdom' && <Wisdom />}
+        {tab === 'wisdom' && <Wisdom state={state} dispatch={dispatch} />}
       </div>
 
       {/* TOAST */}
