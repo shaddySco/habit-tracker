@@ -5,6 +5,7 @@ import Weekly from './components/Weekly'
 import Monthly from './components/Monthly'
 import { Vision } from './components/Vision'
 import Milestones from './components/Milestones'
+import Wisdom from './components/Wisdom'
 
 // ─── INITIAL STATE ───────────────────────────────────────────────
 const buildInitial = () => {
@@ -128,6 +129,7 @@ const TABS = [
   { id: 'monthly', label: 'Monthly Scorecard' },
   { id: 'vision', label: 'Vision Board' },
   { id: 'milestones', label: 'Milestones' },
+  { id: 'wisdom', label: '📖 Daily Wisdom' },
 ]
 
 // ─── LOGIN COMPONENT ─────────────────────────────────────────────
@@ -138,15 +140,15 @@ function Login({ onLogin }) {
       <div style={{ background: 'white', padding: '2.5rem', borderRadius: '1rem', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)', minWidth: '320px', maxWidth: '400px', width: '100%', boxSizing: 'border-box' }}>
         <h2 style={{ marginBottom: '0.5rem', textAlign: 'center', fontSize: '1.75rem', fontWeight: '700', fontFamily: 'Playfair Display, serif' }}>Welcome Back</h2>
         <p style={{ marginBottom: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>Enter your name to view your tracker</p>
-        <input 
-          type="text" 
-          placeholder="Your username..." 
+        <input
+          type="text"
+          placeholder="Your username..."
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && name.trim() && onLogin(name.trim())}
           style={{ padding: '0.875rem', width: '100%', borderRadius: '0.5rem', border: '1px solid #cbd5e1', marginBottom: '1.25rem', fontSize: '1rem', boxSizing: 'border-box', outline: 'none' }}
         />
-        <button 
+        <button
           onClick={() => name.trim() && onLogin(name.trim())}
           style={{ width: '100%', padding: '0.875rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: '600', fontSize: '1rem', transition: 'background 0.2s' }}
         >
@@ -214,6 +216,7 @@ export default function App() {
         {tab === 'monthly' && <Monthly {...pageProps} />}
         {tab === 'vision' && <Vision {...pageProps} />}
         {tab === 'milestones' && <Milestones {...pageProps} />}
+        {tab === 'wisdom' && <Wisdom />}
       </div>
 
       {/* TOAST */}
