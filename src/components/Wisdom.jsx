@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { todayKey } from '../data/categories'
+import { todayKey, monthKey } from '../data/categories'
+import jsPDF from 'jspdf'
 
 const QUOTES = [
     { text: 'The will to succeed is important, but what\'s more important is the will to prepare.', author: 'Bobby Knight' },
@@ -11,13 +12,12 @@ const QUOTES = [
     { text: 'Routine creates calm confidence.', author: 'Jenna Kuria' },
 ]
 
-// Each block has:
-//  - fixed manual steps (lifestyle rules from PDF — never change)
-//  - catIds: which habit CATEGORIES to pull live habits from, filtered by freq
-//  - freqs: which frequencies to include for those cats
+// Default block definitions — only the non-editable parts live here
+// Editable fields (period, time, principle) are overridden by state.routineSettings
 const BLOCK_DEFINITIONS = [
     {
-        period: 'Early Morning Ritual',
+        id: 'early_morning',
+        period: 'Early Morning',
         time: '5:00 – 6:00 AM',
         color: '#534AB7',
         colorLight: '#EEEDFE',
@@ -27,11 +27,10 @@ const BLOCK_DEFINITIONS = [
             { id: 'em1', label: 'No phone for the first 30 minutes', why: 'Protect your focus before the world hijacks it.' },
             { id: 'em3', label: 'Move your body — stretch or walk', why: 'Wake your body up. Energy fuels performance.' },
         ],
-        // Pull daily habits from these categories that fit morning
-        catIds: ['spiritual', 'health'],
-        filterHabitIds: ['s2', 'h2'], // pray, drink water — specific morning ones
+        filterHabitIds: ['s2', 'h2'],
     },
     {
+        id: 'morning_power',
         period: 'Morning Power Hour & Planning',
         time: '6:00 – 7:00 AM',
         color: '#BA7517',
@@ -41,10 +40,10 @@ const BLOCK_DEFINITIONS = [
         manualSteps: [
             { id: 'mp5', label: 'Set your 3 main tasks for today (Daily tab)', why: 'Focus on three essential outcomes. Simplicity increases clarity.' },
         ],
-        catIds: ['spiritual', 'mental'],
-        filterHabitIds: ['s1', 'm4', 's3', 'm2', 'm1'], // Bible, self-help, gratitude, affirmations, journal
+        filterHabitIds: ['s1', 'm4', 's3', 'm2', 'm1'],
     },
     {
+        id: 'classes',
         period: 'Classes, Campus & Focus',
         time: '7:00 – 1:00 PM',
         color: '#993C1D',
@@ -54,10 +53,10 @@ const BLOCK_DEFINITIONS = [
         manualSteps: [
             { id: 'cl3', label: 'Silence notifications during class/work', why: 'Deep work: protect your attention. Guard your mental space.' },
         ],
-        catIds: ['career', 'social'],
-        filterHabitIds: ['c1', 'c2', 'so2'], // project, classes, connect online
+        filterHabitIds: ['c1', 'c2', 'so2'],
     },
     {
+        id: 'midday',
         period: 'Midday Recharge',
         time: '1:00 – 2:00 PM',
         color: '#0F6E56',
@@ -67,10 +66,10 @@ const BLOCK_DEFINITIONS = [
         manualSteps: [
             { id: 'md4', label: 'Eat well — fruits if possible', why: 'Healthy eating is a non-negotiable habit.' },
         ],
-        catIds: ['health', 'financial'],
-        filterHabitIds: ['h3', 'f1', 'f2'], // walk, budget check, no debt
+        filterHabitIds: ['h3', 'f1', 'f2'],
     },
     {
+        id: 'afternoon_skill',
         period: 'Afternoon Skill Development',
         time: '2:00 – 5:00 PM',
         color: '#185FA5',
@@ -78,11 +77,11 @@ const BLOCK_DEFINITIONS = [
         icon: '⚡',
         principle: 'Large dreams need small actions. Plan weekly, execute daily.',
         manualSteps: [],
-        catIds: ['career', 'mental', 'social'],
-        filterHabitIds: ['c3', 'c4', 'c5', 'm5', 'so1'], // design, social media, course, podcast, communication
+        filterHabitIds: ['c3', 'c4', 'c5', 'm5', 'so1'],
     },
     {
-        period: 'Evening Fitness',
+        id: 'evening_workout',
+        period: 'Evening Workout',
         time: '5:00 – 7:00 PM',
         color: '#3B6D11',
         colorLight: '#EAF3DE',
@@ -91,11 +90,11 @@ const BLOCK_DEFINITIONS = [
         manualSteps: [
             { id: 'ew1', label: 'Limit screen time — log off social media', why: 'Replace the bad habit with something intentional.' },
         ],
-        catIds: ['health'],
-        filterHabitIds: ['h1', 'h4', 'h5', 'h6', 'h7'], // workout, run, fruits, health metrics, stress mgmt
+        filterHabitIds: ['h1', 'h4', 'h5', 'h6', 'h7'],
     },
     {
-        period: 'Evening Wind-down & Reflection',
+        id: 'evening_reflection',
+        period: 'Evening Reflection',
         time: '8:00 – 9:30 PM',
         color: '#534AB7',
         colorLight: '#EEEDFE',
@@ -106,8 +105,7 @@ const BLOCK_DEFINITIONS = [
             { id: 'er4', label: 'Plan tomorrow\'s 3 main tasks (Daily tab)', why: 'Prepare tonight so tomorrow starts with clarity.' },
             { id: 'er5', label: 'No phone after 9:30 PM', why: 'Recovery strengthens consistency. Rest without guilt.' },
         ],
-        catIds: ['mental', 'financial', 'social', 'spiritual'],
-        filterHabitIds: ['m6', 'f3', 'so3', 's4', 's5', 's6'], // review goals, save Ksh, call friends, rosary
+        filterHabitIds: ['m6', 'f3', 'so3', 's4', 's5', 's6'],
     },
 ]
 
@@ -123,62 +121,109 @@ function getDayGreeting() {
     return `Good evening — wrapping up ${day}`
 }
 
+// Inline editable field — click to edit, blur/enter to save
+function EditableField({ value, onSave, style, multiline = false }) {
+    const [editing, setEditing] = useState(false)
+    const [draft, setDraft] = useState(value)
+
+    const commit = () => {
+        const trimmed = draft.trim()
+        if (trimmed && trimmed !== value) onSave(trimmed)
+        else setDraft(value)
+        setEditing(false)
+    }
+
+    if (editing) {
+        const shared = {
+            value: draft,
+            onChange: e => setDraft(e.target.value),
+            onBlur: commit,
+            onKeyDown: e => { if (e.key === 'Enter' && !multiline) commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false) } },
+            autoFocus: true,
+            style: {
+                ...style,
+                background: 'var(--surface)',
+                border: '1px solid var(--accent)',
+                borderRadius: 6,
+                padding: '3px 7px',
+                fontFamily: 'DM Sans, sans-serif',
+                outline: 'none',
+                width: '100%',
+                boxSizing: 'border-box',
+                resize: multiline ? 'vertical' : 'none',
+            }
+        }
+        return multiline
+            ? <textarea {...shared} rows={2} />
+            : <input {...shared} type="text" />
+    }
+
+    return (
+        <span
+            onClick={() => { setDraft(value); setEditing(true) }}
+            title="Click to edit"
+            style={{ ...style, cursor: 'text', borderBottom: '1px dashed transparent', transition: 'border .15s' }}
+            onMouseEnter={e => e.currentTarget.style.borderBottomColor = 'var(--muted)'}
+            onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}
+        >
+            {value}
+        </span>
+    )
+}
+
 export default function Wisdom({ state, dispatch }) {
     const [checked, setChecked] = useState({})
     const [collapsed, setCollapsed] = useState({})
+    const [editingBlocks, setEditingBlocks] = useState({})
     const quote = getDailyQuote()
     const today = todayKey()
 
     const toggle = (id) => setChecked(p => ({ ...p, [id]: !p[id] }))
     const toggleCollapse = (period) => setCollapsed(p => ({ ...p, [period]: !p[period] }))
+    const toggleEditBlock = (blockId) => setEditingBlocks(p => ({ ...p, [blockId]: !p[blockId] }))
 
-    // Live habit lookup — reads directly from state.cats
-    const getHabitsForRoutine = (routineKey) => {
-        const habits = []
+    // Save a block field to state (persists via localStorage)
+    const saveBlockField = (blockId, field, value) => {
+        dispatch({ type: 'SET_ROUTINE_BLOCK', blockId, field, value })
+    }
+
+    // Merge defaults with any saved overrides from state.routineSettings
+    const getBlock = (def) => {
+        const overrides = state.routineSettings?.[def.id] || {}
+        return { ...def, ...overrides }
+    }
+
+    const getHabit = (hid) => {
         for (const cat of state.cats) {
-            const found = cat.habits.filter(h => h.routine === routineKey)
-            found.forEach(h => {
-                habits.push({ ...h, catColor: cat.color, catLabel: cat.label })
-            })
+            const h = cat.habits.find(h => h.id === hid)
+            if (h) return { ...h, catColor: cat.color, catLabel: cat.label }
         }
-        return habits
+        return null
     }
 
     const isHabitDone = (hid) => !!state.checks[today + '_' + hid]
 
-    // Toggle a habit's check state directly from the routine
     const toggleHabit = (hid) => {
         dispatch({ type: 'TOGGLE_CHECK', hid, day: today })
     }
 
-    // Today's tasks from state
+    const buildHabitSteps = (filterHabitIds) =>
+        filterHabitIds.map(hid => getHabit(hid)).filter(Boolean)
+
     const tasks = [1, 2, 3].map(n => ({
         text: state.tasks[today + '_task' + n] || '',
         done: !!state.tasks[today + '_task' + n + '_done'],
     })).filter(t => t.text)
 
-    // Overall daily habit progress
     const allDailyHabits = state.cats.flatMap(c => c.habits.filter(h => h.freq === 'daily'))
     const dailyDone = allDailyHabits.filter(h => isHabitDone(h.id)).length
     const dailyPct = allDailyHabits.length ? Math.round(dailyDone / allDailyHabits.length * 100) : 0
 
-    // Mapping between block period and routine keys in data
-    const ROUTINE_MAP = {
-        'Early Morning Ritual': 'early',
-        'Morning Power Hour & Planning': 'morning',
-        'Classes, Campus & Focus': 'focus',
-        'Midday Recharge': 'recharge',
-        'Afternoon Skill Development': 'skill',
-        'Evening Fitness': 'fitness',
-        'Evening Wind-down & Reflection': 'evening'
-    }
-
-    // Build each block's full step list dynamically
-    const builtRoutine = BLOCK_DEFINITIONS.map(block => {
-        const routineKey = ROUTINE_MAP[block.period]
-        const habitSteps = getHabitsForRoutine(routineKey)
-        const allSteps = [...block.manualSteps, ...habitSteps]
-        return { ...block, allSteps, habitSteps }
+    const builtRoutine = BLOCK_DEFINITIONS.map(def => {
+        const block = getBlock(def)
+        const habitSteps = buildHabitSteps(def.filterHabitIds) // always use def's filterHabitIds
+        const allSteps = [...def.manualSteps, ...habitSteps]
+        return { ...block, id: def.id, manualSteps: def.manualSteps, habitSteps, allSteps }
     })
 
     const totalSteps = builtRoutine.reduce((acc, b) => acc + b.allSteps.length, 0)
@@ -190,10 +235,157 @@ export default function Wisdom({ state, dispatch }) {
     const pct = totalSteps ? Math.round((doneSteps / totalSteps) * 100) : 0
     const progressColor = pct < 40 ? '#BA7517' : pct < 75 ? '#185FA5' : '#3B6D11'
 
+    const generatePDF = () => {
+        const doc = new jsPDF()
+        const primary = '#1e293b'
+        const secondary = '#64748b'
+        const accent = '#2563eb'
+        const username = state.username || 'User'
+        const dateStr = new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+
+        // Header
+        doc.setFontSize(22)
+        doc.setTextColor(primary)
+        doc.text('Daily Progress Report', 20, 25)
+        
+        doc.setFontSize(12)
+        doc.setTextColor(secondary)
+        doc.text(`Resolution 2026 Tracker — Prepared for ${username}`, 20, 33)
+        doc.text(dateStr, 20, 40)
+        
+        doc.setDrawColor(226, 232, 240)
+        doc.line(20, 45, 190, 45)
+
+        // Core Objectives
+        if (state.generalGoals) {
+            doc.setFontSize(14)
+            doc.setTextColor(accent)
+            doc.text('Your 2026 Vision', 20, 53)
+            doc.setFontSize(10)
+            doc.setTextColor(primary)
+            const splitGoals = doc.splitTextToSize(state.generalGoals, 170)
+            doc.text(splitGoals, 20, 60)
+            
+            const goalsHeight = splitGoals.length * 5
+            var currentY = 65 + goalsHeight
+        } else {
+            var currentY = 55
+        }
+
+        // 3 Main Tasks
+        doc.setFontSize(16)
+        doc.setTextColor(primary)
+        doc.text('Today\'s 3 Main Tasks', 20, currentY)
+        
+        tasks.forEach((t, i) => {
+            doc.setFontSize(12)
+            doc.setTextColor(t.done ? '#10b981' : primary)
+            const status = t.done ? '[DONE]' : '[TODO]'
+            doc.text(`${i + 1}. ${status} ${t.text}`, 25, currentY + 10 + (i * 8))
+        })
+
+        if (!tasks.length) {
+            doc.setFontSize(11)
+            doc.setTextColor(secondary)
+            doc.text('No tasks set for today.', 25, currentY + 10)
+        }
+        
+        currentY += tasks.length ? (tasks.length * 10) + 10 : 20
+
+        // Habit Progress
+        doc.setFontSize(16)
+        doc.setTextColor(primary)
+        doc.text('Habit Performance', 20, currentY + 15)
+        
+        doc.setFontSize(12)
+        doc.setTextColor(secondary)
+        doc.text(`Overall Routine Completion: ${pct}%`, 25, currentY + 25)
+        doc.text(`Daily Habits Completed: ${dailyDone}/${allDailyHabits.length} (${dailyPct}%)`, 25, currentY + 33)
+
+        // Morning Routine
+        const morningCount = Object.keys(state.morning).filter(k => k.startsWith(today)).length
+        doc.setFontSize(16)
+        doc.setTextColor(primary)
+        doc.text('Morning Rituals', 20, currentY + 50)
+        doc.setFontSize(12)
+        doc.setTextColor(secondary)
+        doc.text(`${morningCount} rituals completed this morning.`, 25, currentY + 60)
+
+        // Quotes & Motivation
+        doc.setFontSize(11)
+        doc.setTextColor(accent)
+        doc.setFont('helvetica', 'italic')
+        doc.text(`"${quote.text}"`, 20, 165, { maxWidth: 170 })
+        doc.text(`— ${quote.author}`, 150, 175)
+
+        // Footer
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.setTextColor(secondary)
+        doc.text('Keep going. Consistency beats motivation always.', 20, 280)
+        doc.text('Generated by Resolution 2026', 150, 280)
+
+        // Save
+        const filename = `Summary_${today}_${username.replace(/\s+/g, '_')}.pdf`
+        doc.save(filename)
+        showToast('PDF Summary Downloaded!')
+
+        // Open Email flow
+        const subject = `Daily Progress Summary — ${username} — ${today}`
+        const body = `Hey!
+
+Attached is my daily summary and progress report for today. 
+
+SUMMARY HIGHLIGHTS:
+- Tasks: ${tasks.filter(t => t.done).length}/${tasks.length} completed
+- Habit Score: ${dailyPct}%
+- Routine Completion: ${pct}%
+
+Check out the attached PDF for the full breakdown!
+
+Consistency beats motivation always.
+${username}`
+
+        const emails = [
+            ...Object.values(state.partners).map(p => p.email),
+            ...Object.values(state.partners2).map(p => p.email)
+        ].filter(Boolean).join(',')
+
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emails)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+        window.open(gmailUrl, '_blank')
+    }
+
     return (
         <div>
-            <div className="page-title">Your Daily Routine</div>
-            <div className="page-sub">{getDayGreeting()} — goals update live as you edit them 🌱</div>
+            <div className="page-title">
+                Your Daily Routine
+                <button 
+                  onClick={generatePDF}
+                  style={{ 
+                    float: 'right', padding: '8px 16px', borderRadius: '8px', 
+                    fontSize: '12px', background: 'var(--accent)', color: 'white', 
+                    border: 'none', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' 
+                  }}
+                >
+                  📄 Generate & Send PDF Summary
+                </button>
+            </div>
+            <div className="page-sub">{getDayGreeting()} — click any title, time or principle to edit it ✏️</div>
+
+            {/* GLOBAL OBJECTIVES STICKY */}
+            {state.generalGoals && (
+                <div style={{ 
+                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', 
+                    padding: '12px 16px', marginBottom: '1.5rem', borderLeft: '4px solid var(--accent)'
+                }}>
+                    <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+                        Your 2026 Vision
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                        {state.generalGoals}
+                    </div>
+                </div>
+            )}
 
             {/* QUOTE */}
             <div style={{ background: 'var(--text)', color: 'white', borderRadius: 14, padding: '1.25rem 1.5rem', marginBottom: '1.25rem' }}>
@@ -204,7 +396,8 @@ export default function Wisdom({ state, dispatch }) {
 
             {/* TODAY'S TASKS */}
             <div style={{
-                background: 'var(--gold-light)', border: tasks.length ? '1px solid #EF9F27' : '1px dashed #EF9F27',
+                background: 'var(--gold-light)',
+                border: tasks.length ? '1px solid #EF9F27' : '1px dashed #EF9F27',
                 borderRadius: 12, padding: '12px 16px', marginBottom: '1.25rem'
             }}>
                 <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--gold-dark)', fontWeight: 500, marginBottom: 8 }}>
@@ -236,12 +429,8 @@ export default function Wisdom({ state, dispatch }) {
                     {pct}%
                 </div>
                 <div style={{ flex: 1, minWidth: 180 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>
-                        Routine — {doneSteps}/{totalSteps} steps done
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-                        Daily habits — {dailyDone}/{allDailyHabits.length} ({dailyPct}%)
-                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>Routine — {doneSteps}/{totalSteps} steps done</div>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Daily habits — {dailyDone}/{allDailyHabits.length} ({dailyPct}%)</div>
                     <div style={{ height: 7, background: 'var(--border)', borderRadius: 4, overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: pct + '%', background: progressColor, borderRadius: 4, transition: 'width .4s' }} />
                     </div>
@@ -263,52 +452,96 @@ export default function Wisdom({ state, dispatch }) {
                 const blockPct = blockTotal ? Math.round((blockDone / blockTotal) * 100) : 0
                 const isCollapsed = collapsed[block.period]
                 const isComplete = blockTotal > 0 && blockDone === blockTotal
+                const isEditing = !!editingBlocks[block.id]
 
                 return (
-                    <div key={block.period} style={{
+                    <div key={block.id} style={{
                         background: 'var(--surface)', border: '1px solid var(--border)',
                         borderRadius: 14, marginBottom: 12, overflow: 'hidden'
                     }}>
                         {/* Header */}
-                        <div
-                            onClick={() => toggleCollapse(block.period)}
-                            style={{
-                                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
-                                cursor: 'pointer', transition: 'background .2s',
-                                background: isComplete ? block.colorLight : 'transparent',
-                            }}
-                        >
-                            <span style={{ fontSize: 20, flexShrink: 0 }}>{block.icon}</span>
-                            <div style={{ flex: 1 }}>
+                        <div style={{
+                            display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+                            background: isComplete ? block.colorLight : 'transparent', transition: 'background .2s',
+                        }}>
+                            {/* Icon — click opens/closes, everything else is editable */}
+                            <span
+                                onClick={() => toggleCollapse(block.id)}
+                                style={{ fontSize: 20, flexShrink: 0, cursor: 'pointer' }}
+                            >
+                                {block.icon}
+                            </span>
+
+                            <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => !isEditing && toggleCollapse(block.id)}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: 14, fontWeight: 500 }}>{block.period}</span>
-                                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: block.colorLight, color: block.color, fontWeight: 500 }}>
-                                        {block.time}
-                                    </span>
+                                    {/* EDITABLE: block title */}
+                                    <EditableField
+                                        value={block.period}
+                                        onSave={v => saveBlockField(block.id, 'period', v)}
+                                        style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}
+                                    />
+                                    {/* EDITABLE: time */}
+                                    <EditableField
+                                        value={block.time}
+                                        onSave={v => saveBlockField(block.id, 'time', v)}
+                                        style={{
+                                            fontSize: 10, padding: '2px 8px', borderRadius: 20,
+                                            background: block.colorLight, color: block.color, fontWeight: 500,
+                                            display: 'inline-block'
+                                        }}
+                                    />
                                     {isComplete && <span style={{ fontSize: 11, color: block.color, fontWeight: 500 }}>✓ Complete</span>}
                                 </div>
                                 <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, marginTop: 6, overflow: 'hidden', width: 120 }}>
                                     <div style={{ height: '100%', width: blockPct + '%', background: block.color, borderRadius: 2, transition: 'width .3s' }} />
                                 </div>
                             </div>
-                            <span style={{ fontSize: 12, color: 'var(--muted)', flexShrink: 0 }}>
-                                {blockDone}/{blockTotal} {isCollapsed ? '▼' : '▲'}
-                            </span>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{blockDone}/{blockTotal}</span>
+                                <button
+                                    onClick={() => toggleEditBlock(block.id)}
+                                    title={isEditing ? 'Done editing' : 'Edit this block'}
+                                    style={{
+                                        fontSize: 11, padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
+                                        fontFamily: 'DM Sans, sans-serif', fontWeight: 500, transition: 'all .15s',
+                                        border: isEditing ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                        background: isEditing ? 'var(--accent)' : 'var(--surface)',
+                                        color: isEditing ? 'white' : 'var(--muted)',
+                                    }}
+                                >
+                                    {isEditing ? '✓ Done' : '✏️'}
+                                </button>
+                                <span
+                                    onClick={() => toggleCollapse(block.id)}
+                                    style={{ fontSize: 12, color: 'var(--muted)', cursor: 'pointer' }}
+                                >
+                                    {isCollapsed ? '▼' : '▲'}
+                                </span>
+                            </div>
                         </div>
 
                         {/* Body */}
                         {!isCollapsed && (
                             <div style={{ padding: '0 16px 14px' }}>
-                                {/* Principle */}
+
+                                {/* EDITABLE: principle */}
                                 <div style={{
                                     fontSize: 12, color: block.color, fontStyle: 'italic',
                                     padding: '8px 12px', background: block.colorLight,
                                     borderRadius: 8, marginBottom: 10, lineHeight: 1.5,
                                 }}>
-                                    "{block.principle}"
+                                    "
+                                    <EditableField
+                                        value={block.principle}
+                                        onSave={v => saveBlockField(block.id, 'principle', v)}
+                                        multiline={true}
+                                        style={{ fontSize: 12, color: block.color, fontStyle: 'italic', lineHeight: 1.5 }}
+                                    />
+                                    "
                                 </div>
 
-                                {/* Manual steps — checkable here */}
+                                {/* Manual steps */}
                                 {block.manualSteps.map((step) => {
                                     const done = !!checked[step.id]
                                     return (
@@ -345,7 +578,7 @@ export default function Wisdom({ state, dispatch }) {
                                     )
                                 })}
 
-                                {/* Live habit steps — label comes from state.cats, checkable here AND in Daily tab */}
+                                {/* Live habit steps */}
                                 {block.habitSteps.map((habit) => {
                                     const done = isHabitDone(habit.id)
                                     return (
@@ -359,7 +592,6 @@ export default function Wisdom({ state, dispatch }) {
                                                 background: done ? block.colorLight : 'var(--bg)',
                                             }}
                                         >
-                                            {/* Circle = synced with Daily tab */}
                                             <div style={{
                                                 width: 18, height: 18, borderRadius: '50%', flexShrink: 0, marginTop: 1,
                                                 border: done ? `2px solid ${block.color}` : '2px solid var(--border)',
@@ -371,7 +603,6 @@ export default function Wisdom({ state, dispatch }) {
                                             </div>
                                             <div style={{ flex: 1 }}>
                                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
-                                                    {/* LIVE TEXT from state.cats — updates when you edit */}
                                                     <span style={{
                                                         fontSize: 13, fontWeight: 500,
                                                         textDecoration: done ? 'line-through' : 'none',
@@ -379,26 +610,26 @@ export default function Wisdom({ state, dispatch }) {
                                                     }}>
                                                         {habit.text}
                                                     </span>
-                                                    {/* Category badge */}
                                                     <span className={`cat-badge badge-${habit.catColor}`} style={{ fontSize: 9, padding: '1px 7px' }}>
                                                         {habit.catLabel}
                                                     </span>
-                                                    <span style={{ fontSize: 9, color: 'var(--muted)', fontStyle: 'italic' }}>
+                                                    <span style={{ fontSize: 9, color: done ? block.color : 'var(--muted)', fontStyle: 'italic' }}>
                                                         {done ? '● synced' : '○ tap to check'}
                                                     </span>
                                                 </div>
-                                                <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.4 }}>
-                                                    {habit.freq === 'weekly' ? '📅 Weekly goal' : habit.freq === 'monthly' ? '📆 Monthly goal' : ''}
-                                                </div>
+                                                {habit.freq !== 'daily' && (
+                                                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                                        {habit.freq === 'weekly' ? '📅 Weekly goal' : '📆 Monthly goal'}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     )
                                 })}
 
-                                {/* Empty state if all habits in this block were deleted */}
                                 {block.habitSteps.length === 0 && block.manualSteps.length === 0 && (
                                     <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '8px 0' }}>
-                                        No goals linked to this block yet. Add habits in the Daily tab.
+                                        No goals linked to this block. Add habits in the Daily tab.
                                     </div>
                                 )}
                             </div>
@@ -419,7 +650,7 @@ export default function Wisdom({ state, dispatch }) {
                     ↺ Reset manual steps
                 </button>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
-                    ○ circle = synced with Daily tab &nbsp;·&nbsp; □ square = routine-only step
+                    ○ circle = synced with Daily tab &nbsp;·&nbsp; □ square = routine-only step &nbsp;·&nbsp; click any title or time to edit
                 </div>
             </div>
 

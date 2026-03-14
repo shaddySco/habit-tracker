@@ -1,6 +1,34 @@
 import { useState, useRef } from 'react'
 import { MORNING_STEPS, DAY_NAMES, todayKey, getWeekDates } from '../data/categories'
 
+// Inline editable category title
+function EditableTitle({ value, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const commit = () => {
+    const t = draft.trim()
+    if (t && t !== value) onSave(t)
+    else setDraft(value)
+    setEditing(false)
+  }
+  if (editing) {
+    return (
+      <input autoFocus value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false) } }}
+        style={{ fontWeight: '700', fontSize: '13px', border: 'none', borderBottom: '1.5px solid var(--accent)', outline: 'none', background: 'transparent', width: '160px', color: 'white' }}
+      />
+    )
+  }
+  return (
+    <span onClick={() => { setDraft(value); setEditing(true) }} title="Click to rename"
+      style={{ cursor: 'text', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+      {value} <span style={{ fontSize: '9px', opacity: 0.6 }}>✏️</span>
+    </span>
+  )
+}
+
 export default function Daily({ state, dispatch, showToast }) {
   const [editMode, setEditMode] = useState({})
   const [newHabit, setNewHabit] = useState({})
@@ -13,7 +41,7 @@ export default function Daily({ state, dispatch, showToast }) {
   const toggleCheck = (hid, day) => dispatch({ type: 'TOGGLE_CHECK', hid, day })
   const toggleTask = (n) => dispatch({ type: 'TOGGLE_TASK', n })
   const setTask = (n, val) => dispatch({ type: 'SET_TASK', n, val })
-  const savePartner = (catId, name, email) => dispatch({ type: 'SAVE_PARTNER', catId, name, email })
+  const savePartner = (catId, name, email, index) => dispatch({ type: 'SAVE_PARTNER', catId, name, email, index })
 
   const addHabit = (catId) => {
     const text = (newHabit[catId] || '').trim()
@@ -41,9 +69,9 @@ export default function Daily({ state, dispatch, showToast }) {
     w.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${src}" style="max-width:100%;max-height:100vh;"></body></html>`)
   }
 
-  const sendIntroEmail = (catId, catLabel) => {
-    const p = state.partners[catId] || {}
-    if (!p.email) { showToast("Please enter your partner's email first"); return }
+  const sendIntroEmail = (catId, catLabel, index = 1) => {
+    const p = (index === 2 ? state.partners2[catId] : state.partners[catId]) || {}
+    if (!p.email) { showToast(`Please enter Partner ${index}'s email first`); return }
     const cat = state.cats.find(c => c.id === catId)
     const username = state.username || 'Your friend'
 
@@ -101,9 +129,9 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
     showToast(`✉️ Gmail compose opened for ${p.name || 'your partner'}!`)
   }
 
-  const scheduleReminder = (catId, catLabel) => {
-    const p = state.partners[catId] || {}
-    if (!p.email) { showToast("Please enter your partner's Gmail first"); return }
+  const scheduleReminder = (catId, catLabel, index = 1) => {
+    const p = (index === 2 ? state.partners2[catId] : state.partners[catId]) || {}
+    if (!p.email) { showToast(`Please enter Partner ${index}'s Gmail first`); return }
     const username = state.username || 'your accountability partner'
     const title = `[${catLabel}] Weekly accountability check-in — ${username}`
     const details = `Hey ${p.name || 'friend'}!\n\nThis is your weekly reminder to check in on ${username}'s ${catLabel} goals.\n\nPlease reach out and encourage them this week!`
@@ -131,6 +159,21 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
           <span className="prog-pct">{dayPct}%</span>
         </div>
       </div>
+
+      {/* GLOBAL OBJECTIVES REFLECTION */}
+      {state.generalGoals && (
+        <div style={{ 
+          background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', 
+          padding: '12px 16px', marginBottom: '1.5rem', borderLeft: '4px solid #2563eb'
+        }}>
+          <div style={{ fontSize: '10px', fontWeight: '700', color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+            Current Core Objectives
+          </div>
+          <div style={{ fontSize: '13px', color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+            {state.generalGoals}
+          </div>
+        </div>
+      )}
 
       {/* MORNING ROUTINE */}
       <div className="morning-box">
@@ -248,13 +291,26 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
         return (
           <div key={cat.id} className="cat-card">
             <div className="cat-card-header">
-              <span className={`cat-badge badge-${cat.color}`}>{cat.label}</span>
+              <span className={`cat-badge badge-${cat.color}`}>
+                <EditableTitle
+                  value={cat.label}
+                  onSave={label => dispatch({ type: 'RENAME_CATEGORY', catId: cat.id, label })}
+                />
+              </span>
               <div className="cat-hdr-right">
                 <span className="pct-text">Daily: {pct}%</span>
                 <button className={`edit-btn${isEdit ? ' active' : ''}`}
                   onClick={() => setEditMode(p => ({ ...p, [cat.id]: !p[cat.id] }))}>
                   {isEdit ? '✓ Done' : '✏️ Edit'}
                 </button>
+                {isEdit && (
+                  <button
+                    onClick={() => { if (window.confirm(`Delete "${cat.label}" group and all its goals?`)) dispatch({ type: 'DELETE_CATEGORY', catId: cat.id }) }}
+                    style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
+                  >
+                    🗑️ Delete
+                  </button>
+                )}
               </div>
             </div>
             <div className="habit-grid-section">
@@ -278,40 +334,53 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
               )}
             </div>
             <div className="partner-section">
-              <div className="partner-lbl">Accountability Partner</div>
-              <div className="partner-form">
-                <div className="p-field">
-                  <label>Partner name</label>
-                  <input type="text" placeholder="e.g. John Kamau" defaultValue={p.name}
-                    onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe-${cat.id}`)?.value || p.email)}
-                    id={`pn-${cat.id}`} />
+              <div className="partner-lbl">Accountability Partners</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+                {/* PARTNER 1 */}
+                <div className="partner-form" style={{ border: '1px solid var(--border)', padding: '12px', borderRadius: '10px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>PARTNER 1</div>
+                  <div className="p-field">
+                    <label>Partner name</label>
+                    <input type="text" placeholder="e.g. John Kamau" defaultValue={p.name}
+                      onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe-${cat.id}`)?.value || p.email, 1)}
+                      id={`pn-${cat.id}`} />
+                  </div>
+                  <div className="p-field">
+                    <label>Gmail address</label>
+                    <input type="email" placeholder="partner@gmail.com" defaultValue={p.email}
+                      onBlur={e => savePartner(cat.id, document.getElementById(`pn-${cat.id}`)?.value || p.name, e.target.value, 1)}
+                      id={`pe-${cat.id}`} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                    <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0, fontSize: 11 }} onClick={() => sendIntroEmail(cat.id, cat.label, 1)}>✉️ Intro</button>
+                    <button className="cal-btn" style={{ flex: 1, margin: 0, fontSize: 11 }} onClick={() => scheduleReminder(cat.id, cat.label, 1)}>📅 Reminder</button>
+                  </div>
                 </div>
-                <div className="p-field">
-                  <label>Gmail address</label>
-                  <input type="email" placeholder="partner@gmail.com" defaultValue={p.email}
-                    onBlur={e => savePartner(cat.id, document.getElementById(`pn-${cat.id}`)?.value || p.name, e.target.value)}
-                    id={`pe-${cat.id}`} />
+
+                {/* PARTNER 2 */}
+                <div className="partner-form" style={{ border: '1px solid var(--border)', padding: '12px', borderRadius: '10px' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>PARTNER 2 (Optional)</div>
+                  <div className="p-field">
+                    <label>Partner name</label>
+                    <input type="text" placeholder="e.g. Mary Wambui" defaultValue={state.partners2[cat.id]?.name || ''}
+                      onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe2-${cat.id}`)?.value || state.partners2[cat.id]?.email, 2)}
+                      id={`pn2-${cat.id}`} />
+                  </div>
+                  <div className="p-field">
+                    <label>Gmail address</label>
+                    <input type="email" placeholder="partner2@gmail.com" defaultValue={state.partners2[cat.id]?.email || ''}
+                      onBlur={e => savePartner(cat.id, document.getElementById(`pn2-${cat.id}`)?.value || state.partners2[cat.id]?.name, e.target.value, 2)}
+                      id={`pe2-${cat.id}`} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                    <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0, fontSize: 11 }} onClick={() => sendIntroEmail(cat.id, cat.label, 2)}>✉️ Intro</button>
+                    <button className="cal-btn" style={{ flex: 1, margin: 0, fontSize: 11 }} onClick={() => scheduleReminder(cat.id, cat.label, 2)}>📅 Reminder</button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button
-                    className="cal-btn"
-                    style={{ flex: 1, backgroundColor: '#10b981', margin: 0 }}
-                    onClick={() => sendIntroEmail(cat.id, cat.label)}
-                  >
-                    ✉️ Send Intro Email
-                  </button>
-                  <button
-                    className="cal-btn"
-                    style={{ flex: 1, margin: 0 }}
-                    onClick={() => scheduleReminder(cat.id, cat.label)}
-                  >
-                    📅 Set Weekly Reminder
-                  </button>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
-                  💡 <strong>Step 1:</strong> Send the intro email first — your partner will see your name, their role, and all the goals they'd be supporting. <strong>Step 2:</strong> Once they accept, set the weekly reminder so they never miss a check-in.
-                </p>
               </div>
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+                💡 <strong>Step 1:</strong> Send the intro email first. <strong>Step 2:</strong> Set the weekly reminder.
+              </p>
             </div>
           </div>
         )
