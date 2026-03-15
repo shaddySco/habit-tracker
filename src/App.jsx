@@ -6,22 +6,16 @@ import Monthly from './components/Monthly'
 import { Vision } from './components/Vision'
 import Milestones from './components/Milestones'
 import Wisdom from './components/Wisdom'
-import Dashboard from './components/Dashboard'
-import Setup from './components/Setup'
 
 // ─── INITIAL STATE ───────────────────────────────────────────────
 const buildInitial = () => {
   const saved = loadState()
-  // If user already has any habits saved, they're an existing user — skip setup
-  const hasExistingData = saved.cats && saved.cats.some(c => c.habits && c.habits.length > 0)
   return {
     username: saved.username || '',
-    userEmail: saved.userEmail || '',
     cats: saved.cats || JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
     checks: saved.checks || {},
     photos: saved.photos || {},
     partners: saved.partners || {},
-    partners2: saved.partners2 || {},
     stars: saved.stars || {},
     notes: saved.notes || {},
     milestones: saved.milestones || {},
@@ -31,8 +25,6 @@ const buildInitial = () => {
     tasks: saved.tasks || {},
     selfcheck: saved.selfcheck || {},
     routineSettings: saved.routineSettings || {},
-    generalGoals: saved.generalGoals || '',
-    setupDone: saved.setupDone || hasExistingData || false,
   }
 }
 
@@ -40,9 +32,8 @@ const buildInitial = () => {
 function reducer(state, action) {
   let next = { ...state }
   switch (action.type) {
-    case 'SET_USER':
+    case 'SET_USERNAME':
       next.username = action.username
-      next.userEmail = action.email
       break
     case 'TOGGLE_MORNING':
       next.morning = { ...state.morning, [todayKey() + '_' + action.id]: !state.morning[todayKey() + '_' + action.id] }
@@ -60,11 +51,7 @@ function reducer(state, action) {
       next.photos = { ...state.photos, [action.key]: action.src }
       break
     case 'SAVE_PARTNER':
-      if (action.index === 2) {
-        next.partners2 = { ...state.partners2, [action.catId]: { name: action.name, email: action.email } }
-      } else {
-        next.partners = { ...state.partners, [action.catId]: { name: action.name, email: action.email } }
-      }
+      next.partners = { ...state.partners, [action.catId]: { name: action.name, email: action.email } }
       break
     case 'ADD_HABIT': {
       const cats = state.cats.map(c => c.id === action.catId
@@ -116,6 +103,11 @@ function reducer(state, action) {
       next.vision = { ...state.vision, [k]: { ...(state.vision[k] || {}), text: action.text } }
       break
     }
+    case 'SET_VISION_CATEGORY': {
+      const k = 'q' + (action.idx + 1)
+      next.vision = { ...state.vision, [k]: { ...(state.vision[k] || {}), category: action.category, categoryLabel: action.categoryLabel } }
+      break
+    }
     case 'TOGGLE_MILESTONE':
       next.milestones = { ...state.milestones, [action.id]: !state.milestones[action.id] }
       break
@@ -124,23 +116,6 @@ function reducer(state, action) {
         ...state.routineSettings,
         [action.blockId]: { ...(state.routineSettings[action.blockId] || {}), [action.field]: action.value }
       }
-      break
-    case 'SET_GENERAL_GOALS':
-      next.generalGoals = action.val
-      break
-    case 'RENAME_CATEGORY':
-      next.cats = state.cats.map(c => c.id === action.catId ? { ...c, label: action.label } : c)
-      break
-    case 'ADD_CATEGORY': {
-      const newId = 'cat_' + Date.now()
-      next.cats = [...state.cats, { id: newId, label: action.label, color: 'mental', habits: [] }]
-      break
-    }
-    case 'DELETE_CATEGORY':
-      next.cats = state.cats.filter(c => c.id !== action.catId)
-      break
-    case 'SETUP_DONE':
-      next.setupDone = true
       break
     default:
       return state
@@ -161,7 +136,6 @@ function calcStreak(state) {
 }
 
 const TABS = [
-  { id: 'dashboard', label: '🏠 Dashboard' },
   { id: 'daily', label: 'Daily' },
   { id: 'weekly', label: 'Weekly Summary' },
   { id: 'monthly', label: 'Monthly Scorecard' },
@@ -173,44 +147,24 @@ const TABS = [
 // ─── LOGIN COMPONENT ─────────────────────────────────────────────
 function Login({ onLogin }) {
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const canSubmit = name.trim() && email.trim()
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#f8fafc', color: '#1e293b' }}>
       <div style={{ background: 'white', padding: '2.5rem', borderRadius: '1rem', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)', minWidth: '320px', maxWidth: '400px', width: '100%', boxSizing: 'border-box' }}>
-        <h2 style={{ marginBottom: '0.5rem', textAlign: 'center', fontSize: '1.75rem', fontWeight: '700', fontFamily: 'Playfair Display, serif' }}>Resolution 2026</h2>
-        <p style={{ marginBottom: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>Create your account to start tracking</p>
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '8px', color: '#475569' }}>Username</label>
-          <input
-            type="text"
-            placeholder="e.g. Shaddy"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ padding: '0.875rem', width: '100%', borderRadius: '0.5rem', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box', outline: 'none' }}
-          />
-        </div>
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '8px', color: '#475569' }}>Email Address</label>
-          <input
-            type="email"
-            placeholder="yourname@gmail.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ padding: '0.875rem', width: '100%', borderRadius: '0.5rem', border: '1px solid #cbd5e1', fontSize: '1rem', boxSizing: 'border-box', outline: 'none' }}
-          />
-        </div>
+        <h2 style={{ marginBottom: '0.5rem', textAlign: 'center', fontSize: '1.75rem', fontWeight: '700', fontFamily: 'Playfair Display, serif' }}>Welcome Back</h2>
+        <p style={{ marginBottom: '2rem', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>Enter your name to view your tracker</p>
+        <input
+          type="text"
+          placeholder="Your username..."
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && name.trim() && onLogin(name.trim())}
+          style={{ padding: '0.875rem', width: '100%', borderRadius: '0.5rem', border: '1px solid #cbd5e1', marginBottom: '1.25rem', fontSize: '1rem', boxSizing: 'border-box', outline: 'none' }}
+        />
         <button
-          disabled={!canSubmit}
-          onClick={() => canSubmit && onLogin(name.trim(), email.trim())}
-          style={{ 
-            width: '100%', padding: '0.875rem', background: canSubmit ? '#2563eb' : '#94a3b8', 
-            color: 'white', border: 'none', borderRadius: '0.5rem', cursor: canSubmit ? 'pointer' : 'default', 
-            fontWeight: '600', fontSize: '1rem', transition: 'background 0.2s' 
-          }}
+          onClick={() => name.trim() && onLogin(name.trim())}
+          style={{ width: '100%', padding: '0.875rem', background: '#2563eb', color: 'white', border: 'none', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: '600', fontSize: '1rem', transition: 'background 0.2s' }}
         >
-          Start My Journey
+          Start Tracking
         </button>
       </div>
     </div>
@@ -220,7 +174,7 @@ function Login({ onLogin }) {
 // ─── APP ─────────────────────────────────────────────────────────
 export default function App() {
   const [state, dispatch] = useReducer(reducer, null, buildInitial)
-  const [tab, setTab] = useState('dashboard')
+  const [tab, setTab] = useState('daily')
   const [toast, setToast] = useState({ msg: '', show: false })
 
   useEffect(() => { saveState(state) }, [state])
@@ -236,11 +190,7 @@ export default function App() {
   const pageProps = { state, dispatch, showToast }
 
   if (!state.username) {
-    return <Login onLogin={(name, email) => dispatch({ type: 'SET_USER', username: name, email })} />
-  }
-
-  if (!state.setupDone) {
-    return <Setup state={state} dispatch={dispatch} />
+    return <Login onLogin={(name) => dispatch({ type: 'SET_USERNAME', username: name })} />
   }
 
   return (
@@ -273,7 +223,6 @@ export default function App() {
 
       {/* MAIN */}
       <div className="main">
-        {tab === 'dashboard' && <Dashboard state={state} dispatch={dispatch} setTab={setTab} />}
         {tab === 'daily' && <Daily {...pageProps} />}
         {tab === 'weekly' && <Weekly {...pageProps} />}
         {tab === 'monthly' && <Monthly {...pageProps} />}

@@ -41,7 +41,7 @@ export default function Daily({ state, dispatch, showToast }) {
   const toggleCheck = (hid, day) => dispatch({ type: 'TOGGLE_CHECK', hid, day })
   const toggleTask = (n) => dispatch({ type: 'TOGGLE_TASK', n })
   const setTask = (n, val) => dispatch({ type: 'SET_TASK', n, val })
-  const savePartner = (catId, name, email, index) => dispatch({ type: 'SAVE_PARTNER', catId, name, email, index })
+  const savePartner = (catId, name, email) => dispatch({ type: 'SAVE_PARTNER', catId, name, email })
 
   const addHabit = (catId) => {
     const text = (newHabit[catId] || '').trim()
@@ -69,9 +69,9 @@ export default function Daily({ state, dispatch, showToast }) {
     w.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${src}" style="max-width:100%;max-height:100vh;"></body></html>`)
   }
 
-  const sendIntroEmail = (catId, catLabel, index = 1) => {
-    const p = (index === 2 ? state.partners2[catId] : state.partners[catId]) || {}
-    if (!p.email) { showToast(`Please enter Partner ${index}'s email first`); return }
+  const sendIntroEmail = (catId, catLabel) => {
+    const p = state.partners[catId] || {}
+    if (!p.email) { showToast("Please enter your partner's email first"); return }
     const cat = state.cats.find(c => c.id === catId)
     const username = state.username || 'Your friend'
 
@@ -129,9 +129,9 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
     showToast(`✉️ Gmail compose opened for ${p.name || 'your partner'}!`)
   }
 
-  const scheduleReminder = (catId, catLabel, index = 1) => {
-    const p = (index === 2 ? state.partners2[catId] : state.partners[catId]) || {}
-    if (!p.email) { showToast(`Please enter Partner ${index}'s Gmail first`); return }
+  const scheduleReminder = (catId, catLabel) => {
+    const p = state.partners[catId] || {}
+    if (!p.email) { showToast("Please enter your partner's Gmail first"); return }
     const username = state.username || 'your accountability partner'
     const title = `[${catLabel}] Weekly accountability check-in — ${username}`
     const details = `Hey ${p.name || 'friend'}!\n\nThis is your weekly reminder to check in on ${username}'s ${catLabel} goals.\n\nPlease reach out and encourage them this week!`
@@ -334,53 +334,32 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
               )}
             </div>
             <div className="partner-section">
-              <div className="partner-lbl">Accountability Partners</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-                {/* PARTNER 1 */}
-                <div className="partner-form" style={{ border: '1px solid var(--border)', padding: '12px', borderRadius: '10px' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>PARTNER 1</div>
-                  <div className="p-field">
-                    <label>Partner name</label>
-                    <input type="text" placeholder="e.g. John Kamau" defaultValue={p.name}
-                      onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe-${cat.id}`)?.value || p.email, 1)}
-                      id={`pn-${cat.id}`} />
-                  </div>
-                  <div className="p-field">
-                    <label>Gmail address</label>
-                    <input type="email" placeholder="partner@gmail.com" defaultValue={p.email}
-                      onBlur={e => savePartner(cat.id, document.getElementById(`pn-${cat.id}`)?.value || p.name, e.target.value, 1)}
-                      id={`pe-${cat.id}`} />
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                    <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0, fontSize: 11 }} onClick={() => sendIntroEmail(cat.id, cat.label, 1)}>✉️ Intro</button>
-                    <button className="cal-btn" style={{ flex: 1, margin: 0, fontSize: 11 }} onClick={() => scheduleReminder(cat.id, cat.label, 1)}>📅 Reminder</button>
-                  </div>
+              <div className="partner-lbl">Accountability Partner</div>
+              <div className="partner-form">
+                <div className="p-field">
+                  <label>Partner name</label>
+                  <input type="text" placeholder="e.g. John Kamau" defaultValue={p.name}
+                    onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe-${cat.id}`)?.value || p.email)}
+                    id={`pn-${cat.id}`} />
                 </div>
-
-                {/* PARTNER 2 */}
-                <div className="partner-form" style={{ border: '1px solid var(--border)', padding: '12px', borderRadius: '10px' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>PARTNER 2 (Optional)</div>
-                  <div className="p-field">
-                    <label>Partner name</label>
-                    <input type="text" placeholder="e.g. Mary Wambui" defaultValue={state.partners2[cat.id]?.name || ''}
-                      onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe2-${cat.id}`)?.value || state.partners2[cat.id]?.email, 2)}
-                      id={`pn2-${cat.id}`} />
-                  </div>
-                  <div className="p-field">
-                    <label>Gmail address</label>
-                    <input type="email" placeholder="partner2@gmail.com" defaultValue={state.partners2[cat.id]?.email || ''}
-                      onBlur={e => savePartner(cat.id, document.getElementById(`pn2-${cat.id}`)?.value || state.partners2[cat.id]?.name, e.target.value, 2)}
-                      id={`pe2-${cat.id}`} />
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                    <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0, fontSize: 11 }} onClick={() => sendIntroEmail(cat.id, cat.label, 2)}>✉️ Intro</button>
-                    <button className="cal-btn" style={{ flex: 1, margin: 0, fontSize: 11 }} onClick={() => scheduleReminder(cat.id, cat.label, 2)}>📅 Reminder</button>
-                  </div>
+                <div className="p-field">
+                  <label>Gmail address</label>
+                  <input type="email" placeholder="partner@gmail.com" defaultValue={p.email}
+                    onBlur={e => savePartner(cat.id, document.getElementById(`pn-${cat.id}`)?.value || p.name, e.target.value)}
+                    id={`pe-${cat.id}`} />
                 </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0 }} onClick={() => sendIntroEmail(cat.id, cat.label)}>
+                    ✉️ Send Intro Email
+                  </button>
+                  <button className="cal-btn" style={{ flex: 1, margin: 0 }} onClick={() => scheduleReminder(cat.id, cat.label)}>
+                    📅 Set Weekly Reminder
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+                  💡 <strong>Step 1:</strong> Send the intro email first. <strong>Step 2:</strong> Set the weekly reminder.
+                </p>
               </div>
-              <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
-                💡 <strong>Step 1:</strong> Send the intro email first. <strong>Step 2:</strong> Set the weekly reminder.
-              </p>
             </div>
           </div>
         )
