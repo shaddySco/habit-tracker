@@ -25,6 +25,10 @@ const buildInitial = () => {
     tasks: saved.tasks || {},
     selfcheck: saved.selfcheck || {},
     routineSettings: saved.routineSettings || {},
+    visionItems: saved.visionItems || [],
+    routineChecks: saved.routineChecks || {},
+    disciplineItems: saved.disciplineItems || [],
+    partnerGroups: saved.partnerGroups || {},
   }
 }
 
@@ -103,6 +107,15 @@ function reducer(state, action) {
       next.vision = { ...state.vision, [k]: { ...(state.vision[k] || {}), text: action.text } }
       break
     }
+    case 'ADD_VISION':
+      next.visionItems = [...(state.visionItems || []), { id: Date.now().toString(), text: '', img: '', category: '', categoryLabel: '', ts: Date.now() }]
+      break
+    case 'DELETE_VISION':
+      next.visionItems = (state.visionItems || []).filter(v => v.id !== action.id)
+      break
+    case 'UPDATE_VISION':
+      next.visionItems = (state.visionItems || []).map(v => v.id === action.id ? { ...v, ...action.patch } : v)
+      break
     case 'SET_VISION_CATEGORY': {
       const k = 'q' + (action.idx + 1)
       next.vision = { ...state.vision, [k]: { ...(state.vision[k] || {}), category: action.category, categoryLabel: action.categoryLabel } }
@@ -117,6 +130,33 @@ function reducer(state, action) {
         [action.blockId]: { ...(state.routineSettings[action.blockId] || {}), [action.field]: action.value }
       }
       break
+    case 'TOGGLE_ROUTINE_CHECK':
+      next.routineChecks = { ...state.routineChecks, [action.key]: !state.routineChecks[action.key] }
+      break
+    case 'ADD_DISCIPLINE':
+      next.disciplineItems = [...(state.disciplineItems || []), { id: Date.now().toString(), text: action.text, category: action.category, freq: action.freq || 'daily', ts: Date.now() }]
+      break
+    case 'DELETE_DISCIPLINE':
+      next.disciplineItems = (state.disciplineItems || []).filter(d => d.id !== action.id)
+      break
+    case 'EDIT_DISCIPLINE':
+      next.disciplineItems = (state.disciplineItems || []).map(d => d.id === action.id ? { ...d, ...action.patch } : d)
+      break
+    case 'ADD_PARTNER_TO_GROUP': {
+      const existing = state.partnerGroups?.[action.catId] || []
+      next.partnerGroups = { ...state.partnerGroups, [action.catId]: [...existing, { id: Date.now().toString(), name: action.name, email: action.email, goal: action.goal }] }
+      break
+    }
+    case 'REMOVE_PARTNER_FROM_GROUP': {
+      const filtered = (state.partnerGroups?.[action.catId] || []).filter(p => p.id !== action.partnerId)
+      next.partnerGroups = { ...state.partnerGroups, [action.catId]: filtered }
+      break
+    }
+    case 'UPDATE_PARTNER_IN_GROUP': {
+      const updated = (state.partnerGroups?.[action.catId] || []).map(p => p.id === action.partnerId ? { ...p, ...action.patch } : p)
+      next.partnerGroups = { ...state.partnerGroups, [action.catId]: updated }
+      break
+    }
     default:
       return state
   }

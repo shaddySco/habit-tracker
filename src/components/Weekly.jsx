@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { getWeekDates, weekStartKey, openCalendarReminder } from '../data/categories'
+import { buildWeeklySummaryHTML, printHTML, PDFButton } from './SummaryPDF'
 
 function buildWeeklySummaryText(state) {
   const weekDates = getWeekDates()
@@ -31,39 +33,55 @@ function buildWeeklySummaryText(state) {
 
 export default function Weekly({ state, dispatch, showToast }) {
   const weekDates = getWeekDates()
-  const r = state.reflection[weekStartKey()] || {}
+  const wk = weekStartKey()
+  const r = state.reflection[wk] || {}
+  const [showReflectionWarning, setShowReflectionWarning] = useState(false)
 
-  const setReflect = (key, val) => dispatch({ type: 'SET_REFLECTION', weekKey: weekStartKey(), key, val })
+  const setReflect = (key, val) => dispatch({ type: 'SET_REFLECTION', weekKey: wk, key, val })
 
-  const notifyAllPartners = () => {
-    const partners = state.cats.filter(cat => state.partners[cat.id]?.email)
-    if (!partners.length) { showToast('No partner emails added yet.'); return }
-    const summary = buildWeeklySummaryText(state)
-    partners.forEach((cat, i) => {
-      setTimeout(() => {
-        const p = state.partners[cat.id]
-        openCalendarReminder({
-          title: `Weekly check-in — ${state.username || "your friend"}'s progress`,
-          details: `Hey ${p.name || 'friend'}! Time to check in on ${state.username || "your friend"}.\n\n${summary}`,
-          email: p.email,
-          recur: 'WEEKLY',
-        })
-      }, i * 800)
-    })
-    showToast(`Opening Google Calendar for ${partners.length} partner(s)...`)
+  // Check if weekly reflection is sufficiently filled
+  const reflectionFields = ['happy', 'achieved', 'grateful', 'distract', 'improve']
+  const filledFields = reflectionFields.filter(k => (r[k] || '').trim().length > 3)
+  const reflectionComplete = filledFields.length >= 3 // at least 3 of 5 filled
+
+  const handlePDFClick = () => {
+    if (!reflectionComplete) {
+      setShowReflectionWarning(true)
+      // Scroll to reflection section
+      document.getElementById('weekly-reflection')?.scrollIntoView({ behavior: 'smooth' })
+      showToast('⚠️ Please complete the Weekly Reflection before generating the summary')
+      return
+    }
+    setShowReflectionWarning(false)
+    printHTML(buildWeeklySummaryHTML(state), `${state.username} — Weekly Summary`)
   }
 
-  const remindSingle = (catId, catLabel) => {
-    const p = state.partners[catId] || {}
-    if (!p.email) { showToast("Please enter your partner's Gmail first"); return }
+  const notifyAllPartners = () => {
+    const partners = state.cats.filter(cat => state.partnerGroups?.[cat.id]?.length)
+    const legacyPartners = state.cats.filter(cat => state.partners[cat.id]?.email)
+    const allCats = [...new Set([...partners.map(c => c.id), ...legacyPartners.map(c => c.id)])]
+
+    if (!allCats.length) { showToast('No partner emails added yet.'); return }
     const summary = buildWeeklySummaryText(state)
-    openCalendarReminder({
-      title: `[${catLabel}] Weekly accountability check-in`,
-      details: `Hey ${p.name || 'friend'}!\n\nHere is this week's summary for ${state.username || "your friend"}'s ${catLabel} goals:\n\n${summary}`,
-      email: p.email,
-      recur: 'WEEKLY',
+    let count = 0
+    allCats.forEach((catId, ci) => {
+      const cat = state.cats.find(c => c.id === catId)
+      const group = state.partnerGroups?.[catId] || []
+      const legacy = state.partners[catId]?.email ? [state.partners[catId]] : []
+      const allP = [...group, ...legacy.filter(l => !group.find(g => g.email === l.email))]
+      allP.forEach((p, pi) => {
+        count++
+        setTimeout(() => {
+          openCalendarReminder({
+            title: `Weekly check-in — ${state.username || "your friend"}'s progress`,
+            details: `Hey ${p.name || 'friend'}! Time to check in on ${state.username || "your friend"}.\n\n${summary}`,
+            email: p.email,
+            recur: 'WEEKLY',
+          })
+        }, (ci * 3 + pi) * 700)
+      })
     })
-    showToast(`Calendar opened for ${p.name || 'partner'}`)
+    showToast(`Opening Google Calendar for ${count} partner(s)...`)
   }
 
   const allPhotos = []
@@ -85,13 +103,31 @@ export default function Weekly({ state, dispatch, showToast }) {
           <div className="page-title">Weekly Summary</div>
           <div className="page-sub">{weekRange}</div>
         </div>
-        <button className="cal-btn" onClick={notifyAllPartners}>📅 Notify All Partners</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <button className="cal-btn" onClick={notifyAllPartners}>📅 Notify All Partners</button>
+          <PDFButton
+            label="Weekly PDF"
+            onClick={handlePDFClick}
+            disabled={!reflectionComplete}
+            disabledReason={`Complete Weekly Reflection first (${filledFields.length}/3 minimum filled)`}
+          />
+        </div>
       </div>
+
+      {/* Reflection completion warning */}
+      {showReflectionWarning && (
+        <div style={{
+          background: '#FFF3CD', border: '1px solid #EF9F27', borderRadius: 10,
+          padding: '10px 14px', marginBottom: '1.25rem', fontSize: 13
+        }}>
+          ⚠️ <strong>Complete your Weekly Reflection first</strong> — scroll down and fill in at least 3 reflection fields before generating the PDF summary.
+        </div>
+      )}
 
       {/* SUMMARY CARDS */}
       <div className="sum-grid">
         {state.cats.map(cat => {
-          const p = state.partners[cat.id] || {}
+          const p = state.partnerGroups?.[cat.id]?.[0] || state.partners[cat.id] || {}
           const daily = cat.habits.filter(h => h.freq === 'daily')
           const weekly = cat.habits.filter(h => h.freq === 'weekly')
           let possible = 0, done = 0, missed = []
@@ -121,11 +157,6 @@ export default function Weekly({ state, dispatch, showToast }) {
                   {missed.length > 3 && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>+{missed.length - 3} more</div>}
                 </div>
               ) : <div className="all-done">All habits done this week!</div>}
-              {p.email && (
-                <button className="remind-btn" onClick={() => remindSingle(cat.id, cat.label)}>
-                  📤 Remind {p.name || 'Partner'} — incl. summary
-                </button>
-              )}
             </div>
           )
         })}
@@ -146,9 +177,16 @@ export default function Weekly({ state, dispatch, showToast }) {
         ) : <div className="no-photos">No photos uploaded this week. Tap 📷 on any habit to add evidence.</div>}
       </div>
 
-      {/* REFLECTION */}
-      <div className="card">
-        <div className="card-title">Weekly Reflection</div>
+      {/* REFLECTION — must fill before PDF */}
+      <div className="card" id="weekly-reflection">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: 8 }}>
+          <div className="card-title" style={{ margin: 0 }}>
+            Weekly Reflection
+            <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 8, color: reflectionComplete ? 'var(--teal)' : 'var(--gold-dark)' }}>
+              {reflectionComplete ? '✓ Complete — PDF ready' : `⚠️ Fill ${3 - filledFields.length} more field(s) to unlock PDF`}
+            </span>
+          </div>
+        </div>
         <div className="reflect-grid">
           <div className="reflect-row-2">
             <div>
@@ -180,6 +218,16 @@ export default function Weekly({ state, dispatch, showToast }) {
               onChange={e => setReflect('improve', e.target.value)} />
           </div>
         </div>
+
+        {/* PDF trigger again at bottom of reflection for convenience */}
+        {reflectionComplete && (
+          <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+            <PDFButton
+              label="Generate Weekly PDF Summary"
+              onClick={() => printHTML(buildWeeklySummaryHTML(state), `${state.username} — Weekly Summary`)}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

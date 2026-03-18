@@ -173,14 +173,37 @@ function EditableField({ value, onSave, style, multiline = false }) {
     )
 }
 
+const DISCIPLINE_CATEGORIES = [
+    { id: 'spiritual', label: 'Spiritual', color: 'spiritual', icon: '🙏' },
+    { id: 'health', label: 'Health & Fitness', color: 'health', icon: '💪' },
+    { id: 'mental', label: 'Mentality', color: 'mental', icon: '🧠' },
+    { id: 'financial', label: 'Financial', color: 'financial', icon: '💰' },
+    { id: 'career', label: 'Career & Skills', color: 'career', icon: '🎯' },
+    { id: 'social', label: 'Social', color: 'social', icon: '🤝' },
+]
+
 export default function Wisdom({ state, dispatch }) {
-    const [checked, setChecked] = useState({})
     const [collapsed, setCollapsed] = useState({})
     const [editingBlocks, setEditingBlocks] = useState({})
+    const [newDiscipline, setNewDiscipline] = useState('')
+    const [newDisciplineCat, setNewDisciplineCat] = useState('mental')
+    const [newDisciplineFreq, setNewDisciplineFreq] = useState('daily')
     const quote = getDailyQuote()
     const today = todayKey()
 
-    const toggle = (id) => setChecked(p => ({ ...p, [id]: !p[id] }))
+    // ── PERSISTED: manual routine checks keyed by today's date + step id ──
+    const isManualDone = (stepId) => !!state.routineChecks?.[today + '_' + stepId]
+    const toggleManual = (stepId) => dispatch({ type: 'TOGGLE_ROUTINE_CHECK', key: today + '_' + stepId })
+    const resetManual = () => {
+        // Clear today's manual checks by dispatching each one that is currently on
+        const prefix = today + '_'
+        Object.keys(state.routineChecks || {}).forEach(k => {
+            if (k.startsWith(prefix) && state.routineChecks[k]) {
+                dispatch({ type: 'TOGGLE_ROUTINE_CHECK', key: k })
+            }
+        })
+    }
+
     const toggleCollapse = (blockId) => setCollapsed(p => ({ ...p, [blockId]: !p[blockId] }))
     const toggleEditBlock = (blockId) => setEditingBlocks(p => ({ ...p, [blockId]: !p[blockId] }))
 
@@ -221,16 +244,54 @@ export default function Wisdom({ state, dispatch }) {
     const dailyDone = allDailyHabits.filter(h => isHabitDone(h.id)).length
     const dailyPct = allDailyHabits.length ? Math.round(dailyDone / allDailyHabits.length * 100) : 0
 
+    // Get linked habit IDs for a block — saved overrides take priority over defaults
+    const getLinkedIds = (def) => {
+        const saved = state.routineSettings?.[def.id]
+        // If user has explicitly set linkedHabitIds (even empty array), use that
+        if (saved && Object.prototype.hasOwnProperty.call(saved, 'linkedHabitIds')) {
+            return saved.linkedHabitIds
+        }
+        return def.filterHabitIds
+    }
+
+    // Toggle a habit link on/off for a block
+    const toggleHabitLink = (blockId, hid) => {
+        const def = BLOCK_DEFINITIONS.find(d => d.id === blockId)
+        const current = getLinkedIds(def)
+        const updated = current.includes(hid) ? current.filter(id => id !== hid) : [...current, hid]
+        dispatch({ type: 'SET_ROUTINE_BLOCK', blockId, field: 'linkedHabitIds', value: updated })
+    }
+
+    // Delete a block (store as hidden in routineSettings)
+    const deleteBlock = (blockId) => {
+        dispatch({ type: 'SET_ROUTINE_BLOCK', blockId, field: 'hidden', value: true })
+    }
+
+    // Restore a deleted block
+    const restoreBlock = (blockId) => {
+        dispatch({ type: 'SET_ROUTINE_BLOCK', blockId, field: 'hidden', value: false })
+    }
+
     const builtRoutine = BLOCK_DEFINITIONS.map(def => {
         const block = getBlock(def)
-        const habitSteps = buildHabitSteps(def.filterHabitIds) // always use def's filterHabitIds
+        const linkedIds = getLinkedIds(def)
+        const habitSteps = buildHabitSteps(linkedIds)
         const allSteps = [...def.manualSteps, ...habitSteps]
-        return { ...block, id: def.id, manualSteps: def.manualSteps, habitSteps, allSteps }
+        return { ...block, id: def.id, manualSteps: def.manualSteps, habitSteps, allSteps, linkedIds }
     })
 
-    const totalSteps = builtRoutine.reduce((acc, b) => acc + b.allSteps.length, 0)
-    const doneSteps = builtRoutine.reduce((acc, b) => {
-        const manualDone = b.manualSteps.filter(s => !!checked[s.id]).length
+    // Separate visible and hidden blocks
+    const visibleBlocks = builtRoutine.filter(b => !b.hidden)
+    const hiddenBlocks = builtRoutine.filter(b => b.hidden)
+
+    // All habits flat list for the link picker
+    const allHabits = state.cats.flatMap(cat =>
+        cat.habits.map(h => ({ ...h, catColor: cat.color, catLabel: cat.label, catId: cat.id }))
+    )
+
+    const totalSteps = visibleBlocks.reduce((acc, b) => acc + b.allSteps.length, 0)
+    const doneSteps = visibleBlocks.reduce((acc, b) => {
+        const manualDone = b.manualSteps.filter(s => isManualDone(s.id)).length
         const habitsDone = b.habitSteps.filter(h => isHabitDone(h.id)).length
         return acc + manualDone + habitsDone
     }, 0)
@@ -299,8 +360,8 @@ export default function Wisdom({ state, dispatch }) {
             </div>
 
             {/* ROUTINE BLOCKS */}
-            {builtRoutine.map((block) => {
-                const manualDone = block.manualSteps.filter(s => !!checked[s.id]).length
+            {visibleBlocks.map((block) => {
+                const manualDone = block.manualSteps.filter(s => isManualDone(s.id)).length
                 const habitsDone = block.habitSteps.filter(h => isHabitDone(h.id)).length
                 const blockDone = manualDone + habitsDone
                 const blockTotal = block.allSteps.length
@@ -398,11 +459,11 @@ export default function Wisdom({ state, dispatch }) {
 
                                 {/* Manual steps */}
                                 {block.manualSteps.map((step) => {
-                                    const done = !!checked[step.id]
+                                    const done = isManualDone(step.id)
                                     return (
                                         <div
                                             key={step.id}
-                                            onClick={() => toggle(step.id)}
+                                            onClick={() => toggleManual(step.id)}
                                             style={{
                                                 display: 'flex', alignItems: 'flex-start', gap: 10,
                                                 padding: '9px 10px', borderRadius: 9, marginBottom: 4,
@@ -482,9 +543,71 @@ export default function Wisdom({ state, dispatch }) {
                                     )
                                 })}
 
-                                {block.habitSteps.length === 0 && block.manualSteps.length === 0 && (
-                                    <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', padding: '8px 0' }}>
-                                        No goals linked to this block. Add habits in the Daily tab.
+                                {/* ── LINK GOALS PANEL (shown when editing) ── */}
+                                {isEditing && (
+                                    <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                                        <div style={{ fontSize: 12, fontWeight: 500, marginBottom: 8, color: 'var(--text)' }}>
+                                            🔗 Link goals to this block
+                                        </div>
+                                        {allHabits.length === 0 && (
+                                            <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                                                No habits yet — add them in the Daily tab first.
+                                            </div>
+                                        )}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+                                            {allHabits.map(h => {
+                                                const linked = block.linkedIds.includes(h.id)
+                                                return (
+                                                    <div
+                                                        key={h.id}
+                                                        onClick={() => toggleHabitLink(block.id, h.id)}
+                                                        style={{
+                                                            display: 'flex', alignItems: 'center', gap: 8,
+                                                            padding: '7px 10px', borderRadius: 8, cursor: 'pointer',
+                                                            background: linked ? block.colorLight : 'var(--bg)',
+                                                            border: linked ? `1px solid ${block.color}` : '1px solid var(--border)',
+                                                            transition: 'all .15s',
+                                                        }}
+                                                    >
+                                                        <div style={{
+                                                            width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                                                            border: linked ? `2px solid ${block.color}` : '2px solid var(--border)',
+                                                            background: linked ? block.color : 'transparent',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                        }}>
+                                                            {linked && <span style={{ color: 'white', fontSize: 9 }}>✓</span>}
+                                                        </div>
+                                                        <span style={{ fontSize: 13, flex: 1, color: 'var(--text)' }}>{h.text}</span>
+                                                        <span className={`cat-badge badge-${h.catColor}`} style={{ fontSize: 9, padding: '1px 6px' }}>
+                                                            {h.catLabel}
+                                                        </span>
+                                                        <span style={{ fontSize: 9, color: 'var(--muted)', background: 'var(--border)', padding: '1px 6px', borderRadius: 8 }}>
+                                                            {h.freq}
+                                                        </span>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                        {/* Delete block */}
+                                        <button
+                                            onClick={() => { deleteBlock(block.id); toggleEditBlock(block.id) }}
+                                            style={{
+                                                marginTop: 12, width: '100%', padding: '8px', borderRadius: 8,
+                                                border: '1px solid var(--red)', background: 'var(--red-light)',
+                                                color: 'var(--red)', fontSize: 12, fontWeight: 500,
+                                                cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                                            }}>
+                                            🗑 Delete this block from routine
+                                        </button>
+                                    </div>
+                                )}
+
+                                {!isEditing && block.habitSteps.length === 0 && block.manualSteps.length === 0 && (
+                                    <div style={{
+                                        fontSize: 12, color: 'var(--muted)', padding: '10px 12px',
+                                        background: 'var(--bg)', borderRadius: 8, textAlign: 'center'
+                                    }}>
+                                        No goals linked — click <strong>✏️</strong> to link your habits to this block
                                     </div>
                                 )}
                             </div>
@@ -493,10 +616,33 @@ export default function Wisdom({ state, dispatch }) {
                 )
             })}
 
+            {/* HIDDEN BLOCKS — restore option */}
+            {hiddenBlocks.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>
+                        Hidden blocks ({hiddenBlocks.length})
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {hiddenBlocks.map(b => (
+                            <button
+                                key={b.id}
+                                onClick={() => restoreBlock(b.id)}
+                                style={{
+                                    padding: '5px 12px', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                                    cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
+                                    border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--muted)',
+                                }}>
+                                + Restore {b.period}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             {/* RESET */}
             <div style={{ textAlign: 'center', margin: '8px 0 1.5rem' }}>
                 <button
-                    onClick={() => setChecked({})}
+                    onClick={() => resetManual()}
                     style={{
                         padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 500,
                         cursor: 'pointer', fontFamily: 'DM Sans, sans-serif',
@@ -506,6 +652,91 @@ export default function Wisdom({ state, dispatch }) {
                 </button>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
                     ○ circle = synced with Daily tab &nbsp;·&nbsp; □ square = routine-only step &nbsp;·&nbsp; click any title or time to edit
+                </div>
+            </div>
+
+            {/* ── ADD DISCIPLINE SECTION ── */}
+            <div className="card" style={{ marginTop: '1.5rem' }}>
+                <div className="card-title">My Disciplines</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: '1rem' }}>
+                    Add personal disciplines to track under a specific life category — they appear in your Daily habits automatically.
+                </div>
+
+                {/* Existing disciplines grouped by category */}
+                {DISCIPLINE_CATEGORIES.map(cat => {
+                    const items = (state.disciplineItems || []).filter(d => d.category === cat.id)
+                    if (!items.length) return null
+                    return (
+                        <div key={cat.id} style={{ marginBottom: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                                <span style={{ fontSize: 14 }}>{cat.icon}</span>
+                                <span className={`cat-badge badge-${cat.color}`} style={{ fontSize: 10, padding: '2px 10px' }}>{cat.label}</span>
+                            </div>
+                            {items.map(d => (
+                                <div key={d.id} style={{
+                                    display: 'flex', alignItems: 'center', gap: 8,
+                                    padding: '7px 10px', background: 'var(--bg)', borderRadius: 8,
+                                    marginBottom: 4, border: '1px solid var(--border)'
+                                }}>
+                                    <span style={{ fontSize: 13, flex: 1 }}>{d.text}</span>
+                                    <span style={{ fontSize: 10, color: 'var(--muted)', background: 'var(--border)', padding: '2px 7px', borderRadius: 10 }}>{d.freq}</span>
+                                    <button
+                                        onClick={() => dispatch({ type: 'DELETE_DISCIPLINE', id: d.id })}
+                                        style={{ width: 22, height: 22, borderRadius: 5, border: 'none', background: 'var(--red-light)', color: 'var(--red)', cursor: 'pointer', fontSize: 13 }}>
+                                        ×
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )
+                })}
+
+                {/* Add new discipline form */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8, alignItems: 'flex-end' }}>
+                    <input
+                        type="text"
+                        placeholder="e.g. Meditate for 10 minutes..."
+                        value={newDiscipline}
+                        onChange={e => setNewDiscipline(e.target.value)}
+                        onKeyDown={e => {
+                            if (e.key === 'Enter' && newDiscipline.trim()) {
+                                dispatch({ type: 'ADD_DISCIPLINE', text: newDiscipline.trim(), category: newDisciplineCat, freq: newDisciplineFreq })
+                                setNewDiscipline('')
+                            }
+                        }}
+                        style={{
+                            flex: 1, minWidth: 180, border: '1px solid var(--border)', borderRadius: 8,
+                            padding: '8px 10px', fontSize: 13, fontFamily: 'DM Sans, sans-serif',
+                            background: 'var(--bg)', color: 'var(--text)', outline: 'none'
+                        }}
+                    />
+                    <select
+                        value={newDisciplineCat}
+                        onChange={e => setNewDisciplineCat(e.target.value)}
+                        style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12, fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', outline: 'none' }}>
+                        {DISCIPLINE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                    </select>
+                    <select
+                        value={newDisciplineFreq}
+                        onChange={e => setNewDisciplineFreq(e.target.value)}
+                        style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12, fontFamily: 'DM Sans, sans-serif', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer', outline: 'none' }}>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                    <button
+                        onClick={() => {
+                            if (!newDiscipline.trim()) return
+                            dispatch({ type: 'ADD_DISCIPLINE', text: newDiscipline.trim(), category: newDisciplineCat, freq: newDisciplineFreq })
+                            setNewDiscipline('')
+                        }}
+                        style={{
+                            padding: '8px 14px', background: 'var(--accent)', color: 'white',
+                            border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                            cursor: 'pointer', fontFamily: 'DM Sans, sans-serif'
+                        }}>
+                        + Add
+                    </button>
                 </div>
             </div>
 

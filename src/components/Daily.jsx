@@ -1,38 +1,16 @@
 import { useState, useRef } from 'react'
-import { MORNING_STEPS, DAY_NAMES, todayKey, getWeekDates } from '../data/categories'
-
-// Inline editable category title
-function EditableTitle({ value, onSave }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
-  const commit = () => {
-    const t = draft.trim()
-    if (t && t !== value) onSave(t)
-    else setDraft(value)
-    setEditing(false)
-  }
-  if (editing) {
-    return (
-      <input autoFocus value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setDraft(value); setEditing(false) } }}
-        style={{ fontWeight: '700', fontSize: '13px', border: 'none', borderBottom: '1.5px solid var(--accent)', outline: 'none', background: 'transparent', width: '160px', color: 'white' }}
-      />
-    )
-  }
-  return (
-    <span onClick={() => { setDraft(value); setEditing(true) }} title="Click to rename"
-      style={{ cursor: 'text', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-      {value} <span style={{ fontSize: '9px', opacity: 0.6 }}>✏️</span>
-    </span>
-  )
-}
+import { MORNING_STEPS, DAY_NAMES, todayKey, getWeekDates, openCalendarReminder } from '../data/categories'
+import { buildDailySummaryHTML, printHTML, PDFButton } from './SummaryPDF'
+import { notifyPartnersOfGoalChange } from '../utils/notifyPartners'
 
 export default function Daily({ state, dispatch, showToast }) {
   const [editMode, setEditMode] = useState({})
   const [newHabit, setNewHabit] = useState({})
   const [newFreq, setNewFreq] = useState({})
+  const [showPartnerGroup, setShowPartnerGroup] = useState({})
+  const [newPartnerName, setNewPartnerName] = useState({})
+  const [newPartnerEmail, setNewPartnerEmail] = useState({})
+  const [newPartnerGoal, setNewPartnerGoal] = useState({})
   const fileRefs = useRef({})
   const weekDates = getWeekDates()
   const todayIdx = weekDates.indexOf(todayKey())
@@ -41,14 +19,36 @@ export default function Daily({ state, dispatch, showToast }) {
   const toggleCheck = (hid, day) => dispatch({ type: 'TOGGLE_CHECK', hid, day })
   const toggleTask = (n) => dispatch({ type: 'TOGGLE_TASK', n })
   const setTask = (n, val) => dispatch({ type: 'SET_TASK', n, val })
-  const savePartner = (catId, name, email) => dispatch({ type: 'SAVE_PARTNER', catId, name, email })
 
   const addHabit = (catId) => {
     const text = (newHabit[catId] || '').trim()
     if (!text) { showToast('Please enter a goal name'); return }
     dispatch({ type: 'ADD_HABIT', catId, text, freq: newFreq[catId] || 'daily' })
     setNewHabit(p => ({ ...p, [catId]: '' }))
-    showToast('Goal added!')
+    // Notify partners after state updates (short delay so state is fresh)
+    setTimeout(() => {
+      const count = notifyPartnersOfGoalChange({ state, catId, changeType: 'added', habitText: text })
+      if (count > 0) showToast(`Goal added! ✉️ Notifying ${count} partner(s)...`)
+      else showToast('Goal added!')
+    }, 200)
+  }
+
+  const editHabitWithNotify = (catId, hid, oldText, newText) => {
+    if (!newText.trim() || newText === oldText) return
+    dispatch({ type: 'EDIT_HABIT', catId, hid, text: newText.trim() })
+    setTimeout(() => {
+      const count = notifyPartnersOfGoalChange({ state, catId, changeType: 'edited', habitText: newText.trim(), oldText })
+      if (count > 0) showToast(`Goal updated! ✉️ Notifying ${count} partner(s)...`)
+    }, 200)
+  }
+
+  const deleteHabitWithNotify = (catId, hid, habitText) => {
+    dispatch({ type: 'DELETE_HABIT', catId, hid })
+    setTimeout(() => {
+      const count = notifyPartnersOfGoalChange({ state, catId, changeType: 'deleted', habitText })
+      if (count > 0) showToast(`Goal removed. ✉️ Notifying ${count} partner(s)...`)
+      else showToast('Goal removed.')
+    }, 200)
   }
 
   const handlePhoto = (hid, e) => {
@@ -69,83 +69,110 @@ export default function Daily({ state, dispatch, showToast }) {
     w.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${src}" style="max-width:100%;max-height:100vh;"></body></html>`)
   }
 
-  const sendIntroEmail = (catId, catLabel) => {
-    const p = state.partners[catId] || {}
-    if (!p.email) { showToast("Please enter your partner's email first"); return }
-    const cat = state.cats.find(c => c.id === catId)
+  // ── PARTNER GROUP HELPERS ──
+  const getPartnerGroup = (catId) => state.partnerGroups?.[catId] || []
+
+  const addPartnerToGroup = (catId) => {
+    const name = (newPartnerName[catId] || '').trim()
+    const email = (newPartnerEmail[catId] || '').trim()
+    const goal = (newPartnerGoal[catId] || '').trim()
+    if (!email) { showToast('Please enter a Gmail address'); return }
+    dispatch({ type: 'ADD_PARTNER_TO_GROUP', catId, name, email, goal })
+    setNewPartnerName(p => ({ ...p, [catId]: '' }))
+    setNewPartnerEmail(p => ({ ...p, [catId]: '' }))
+    setNewPartnerGoal(p => ({ ...p, [catId]: '' }))
+    showToast(`✅ ${name || email} added to ${catId} group`)
+  }
+
+  const removePartner = (catId, partnerId) => {
+    dispatch({ type: 'REMOVE_PARTNER_FROM_GROUP', catId, partnerId })
+    showToast('Partner removed')
+  }
+
+  const sendGroupIntroEmail = (catId, catLabel) => {
+    const partners = getPartnerGroup(catId)
+    if (!partners.length) { showToast('No partners in this group yet'); return }
     const username = state.username || 'Your friend'
-
-    const daily = cat.habits.filter(h => h.freq === 'daily')
-    const weekly = cat.habits.filter(h => h.freq === 'weekly')
-    const monthly = cat.habits.filter(h => h.freq === 'monthly')
-
+    const cat = state.cats.find(c => c.id === catId)
+    const daily = cat?.habits.filter(h => h.freq === 'daily') || []
+    const weekly = cat?.habits.filter(h => h.freq === 'weekly') || []
+    const monthly = cat?.habits.filter(h => h.freq === 'monthly') || []
     const formatSection = (label, habits) =>
       habits.length ? `  [${label}]\n${habits.map(h => `    • ${h.text}`).join('\n')}` : ''
-
     const goalSections = [
       formatSection('Daily', daily),
       formatSection('Weekly', weekly),
       formatSection('Monthly', monthly),
-    ].filter(Boolean).join('\n\n')
+    ].filter(Boolean).join('\n\n') || '  No goals set yet.'
 
-    const habitsList = goalSections || '  No goals set yet.'
-
-    const subject = `${username} is inviting you to be their Accountability Partner — ${catLabel}`
-    const body = `Hey ${p.name || 'there'},
-
-I'm reaching out because I trust you and believe you can help me grow.
-
-I'm committed to levelling up my ${catLabel} in 2026, and I'd love for you to be my accountability partner in this area.
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-WHAT DOES THIS MEAN?
-━━━━━━━━━━━━━━━━━━━━━━━━
-As my accountability partner, your role would be to:
-  ✅ Check in with me once a week (a quick message is enough)
-  ✅ Ask me how my goals are going — honestly
-  ✅ Encourage me when I'm consistent, challenge me when I'm not
-  ✅ Receive a weekly progress report from my habit tracker
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-GOALS YOU'D BE HELPING ME ACHIEVE (${catLabel.toUpperCase()})
-━━━━━━━━━━━━━━━━━━━━━━━━
-${habitsList}
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-IF YOU ACCEPT
-━━━━━━━━━━━━━━━━━━━━━━━━
-Simply reply to this email with "I'm in!" and I will set up a weekly Google Calendar reminder so you never forget to check in.
-
-This means a lot to me — having someone in my corner will make a real difference. No pressure, but I truly hope you'll say yes.
-
-With gratitude,
-${username} 🙏
-
----
-P.S. Once the weekly reminder is set up, you'll receive a progress summary for my ${catLabel} goals every week automatically. Your check-ins will help keep me honest and consistent throughout 2026!
-`
-    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(p.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-    window.open(gmailUrl, '_blank')
-    showToast(`✉️ Gmail compose opened for ${p.name || 'your partner'}!`)
+    partners.forEach((p, i) => {
+      setTimeout(() => {
+        const subject = `${username} is inviting you to their ${catLabel} Accountability Group`
+        const personalGoal = p.goal ? `\nYour specific focus for me: "${p.goal}"\n` : ''
+        const body = `Hey ${p.name || 'there'},\n\nMy name is ${username}, and I'm building a small accountability group for my ${catLabel} goals — and I'd love for you to be part of it.\n\n${personalGoal}\nAs a group member, your role would be to:\n  ✅ Check in with me 3 times a week (Mon, Wed, Fri)\n  ✅ Ask how my goals are going — honestly\n  ✅ Encourage me when I'm consistent, challenge me when I'm not\n  ✅ Receive a weekly progress report\n\n━━━━━━━━━━━━━━━━━━━━━━━━\nGOALS I'M WORKING ON (${catLabel.toUpperCase()})\n━━━━━━━━━━━━━━━━━━━━━━━━\n${goalSections}\n\nSimply reply "I'm in!" to accept.\n\nWith gratitude,\n${username} 🙏`
+        const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(p.email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+        window.open(gmailUrl, '_blank')
+      }, i * 800)
+    })
+    showToast(`✉️ Opening Gmail for ${partners.length} partner(s)...`)
   }
 
-  const scheduleReminder = (catId, catLabel) => {
-    const p = state.partners[catId] || {}
-    if (!p.email) { showToast("Please enter your partner's Gmail first"); return }
+  const scheduleGroupReminder = (catId, catLabel) => {
+    const partners = getPartnerGroup(catId)
+    if (!partners.length) { showToast('No partners in this group yet'); return }
     const username = state.username || 'your accountability partner'
-    const title = `[${catLabel}] Weekly accountability check-in — ${username}`
-    const details = `Hey ${p.name || 'friend'}!\n\nThis is your weekly reminder to check in on ${username}'s ${catLabel} goals.\n\nPlease reach out and encourage them this week!`
-    const now = new Date(); const s = new Date(now); s.setHours(9, 0, 0, 0)
-    const e2 = new Date(s); e2.setHours(9, 30, 0, 0)
-    const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
-    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&details=${encodeURIComponent(details)}&dates=${fmt(s)}/${fmt(e2)}&recur=RRULE:FREQ=WEEKLY&add=${encodeURIComponent(p.email)}`
-    window.open(url, '_blank')
-    showToast(`Calendar opened for ${p.name || 'partner'}`)
+    // 3x per week: Monday, Wednesday, Friday
+    partners.forEach((p, i) => {
+      setTimeout(() => {
+        const title = `[${catLabel}] Check in on ${username} — 3x this week`
+        const details = [
+          `Hey ${p.name || 'friend'}!`,
+          ``,
+          `This is one of your 3 weekly check-ins for ${username}'s ${catLabel} goals.`,
+          `You're set to check in every Monday, Wednesday, and Friday.`,
+          p.goal ? `\nYour specific focus: "${p.goal}"` : '',
+          ``,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `WHAT TO DO ON EACH CHECK-IN`,
+          `━━━━━━━━━━━━━━━━━━━━━━`,
+          `  ✅ Send a quick message — "How's your ${catLabel} going?"`,
+          `  ✅ Ask about one specific habit they're working on`,
+          `  ✅ Celebrate a win if they mention one`,
+          `  ✅ Challenge them if they're slacking`,
+          ``,
+          `⚠️ Note: This reminder has changed from weekly to 3 times per week`,
+          `(Monday, Wednesday, Friday) so you can be a more consistent presence.`,
+          ``,
+          `Your support makes a real difference. Thank you! 🙏`,
+          `— ${username}'s Habit Tracker`,
+        ].filter(l => l !== null).join('\n')
+
+        // Build Google Calendar URL with 3x weekly recurrence (MO, WE, FR)
+        const now = new Date()
+        const start = new Date(now)
+        start.setHours(9, 0, 0, 0)
+        const end = new Date(start)
+        end.setHours(9, 30, 0, 0)
+        const fmt = d => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+        const rrule = 'RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR'
+        const url = `https://calendar.google.com/calendar/render?action=TEMPLATE` +
+          `&text=${encodeURIComponent(title)}` +
+          `&details=${encodeURIComponent(details)}` +
+          `&dates=${fmt(start)}/${fmt(end)}` +
+          `&recur=${encodeURIComponent(rrule)}` +
+          `&add=${encodeURIComponent(p.email)}`
+        window.open(url, '_blank')
+      }, i * 800)
+    })
+    showToast(`📅 3x/week reminders set for ${partners.length} partner(s) — Mon, Wed, Fri`)
   }
 
   const totalDaily = state.cats.flatMap(c => c.habits.filter(h => h.freq === 'daily')).length
   const doneToday = state.cats.flatMap(c => c.habits.filter(h => h.freq === 'daily' && state.checks[todayKey() + '_' + h.id])).length
   const dayPct = totalDaily ? Math.round(doneToday / totalDaily * 100) : 0
+
+  // Discipline items from Wisdom tab, grouped by category
+  const disciplineItems = state.disciplineItems || []
 
   return (
     <div>
@@ -154,26 +181,17 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
           <div className="page-title">Today's Habits</div>
           <div className="page-sub">{new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
         </div>
-        <div className="prog-wrap">
-          <div className="prog-track"><div className="prog-fill fill-health" style={{ width: dayPct + '%' }} /></div>
-          <span className="prog-pct">{dayPct}%</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div className="prog-wrap">
+            <div className="prog-track"><div className="prog-fill fill-health" style={{ width: dayPct + '%' }} /></div>
+            <span className="prog-pct">{dayPct}%</span>
+          </div>
+          <PDFButton
+            label="End of Day Summary"
+            onClick={() => printHTML(buildDailySummaryHTML(state, todayKey()), `${state.username} — Daily Summary`)}
+          />
         </div>
       </div>
-
-      {/* GLOBAL OBJECTIVES REFLECTION */}
-      {state.generalGoals && (
-        <div style={{ 
-          background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', 
-          padding: '12px 16px', marginBottom: '1.5rem', borderLeft: '4px solid #2563eb'
-        }}>
-          <div style={{ fontSize: '10px', fontWeight: '700', color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
-            Current Core Objectives
-          </div>
-          <div style={{ fontSize: '13px', color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
-            {state.generalGoals}
-          </div>
-        </div>
-      )}
 
       {/* MORNING ROUTINE */}
       <div className="morning-box">
@@ -230,10 +248,14 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
         const doneD = daily.filter(h => state.checks[todayKey() + '_' + h.id]).length
         const pct = daily.length ? Math.round(doneD / daily.length * 100) : 0
         const isEdit = !!editMode[cat.id]
-        const p = state.partners[cat.id] || { name: '', email: '' }
+        const partnerGroup = getPartnerGroup(cat.id)
+        const showGroup = !!showPartnerGroup[cat.id]
 
-        const renderFreqSection = (freq, habits) => {
-          if (!habits.length && !isEdit) return null
+        // Discipline items for this category from Wisdom tab
+        const catDisciplines = disciplineItems.filter(d => d.category === cat.id)
+
+        const renderFreqSection = (freq, habits, extraItems = []) => {
+          if (!habits.length && !extraItems.length && !isEdit) return null
           const labels = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }
           const pillClass = { daily: 'freq-daily', weekly: 'freq-weekly', monthly: 'freq-monthly' }
           return (
@@ -245,14 +267,14 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
               {isEdit ? habits.map(h => (
                 <div key={h.id} className="edit-mode-row">
                   <input className="edit-habit-input" defaultValue={h.text}
-                    onBlur={e => dispatch({ type: 'EDIT_HABIT', catId: cat.id, hid: h.id, text: e.target.value })} />
+                    onBlur={e => editHabitWithNotify(cat.id, h.id, h.text, e.target.value)} />
                   <select className="move-select" value={h.freq}
                     onChange={e => dispatch({ type: 'MOVE_HABIT', catId: cat.id, hid: h.id, freq: e.target.value })}>
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                     <option value="monthly">Monthly</option>
                   </select>
-                  <button className="del-btn" onClick={() => dispatch({ type: 'DELETE_HABIT', catId: cat.id, hid: h.id })}>×</button>
+                  <button className="del-btn" onClick={() => deleteHabitWithNotify(cat.id, h.id, h.text)}>×</button>
                 </div>
               )) : habits.map(h => {
                 const photo = state.photos[todayKey() + '_' + h.id]
@@ -283,7 +305,22 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
                   </div>
                 )
               })}
-              {isEdit && !habits.length && <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 8px', fontStyle: 'italic' }}>No {freq} goals yet</div>}
+
+              {/* Discipline items from Wisdom tab — shown as read-only with a different indicator */}
+              {!isEdit && extraItems.map(d => (
+                <div key={d.id} className="grid-habit-row" style={{ opacity: 0.85 }}>
+                  <div className="grid-habit-name" title={d.text} style={{ fontStyle: 'italic' }}>
+                    {d.text}
+                    <span style={{ fontSize: 9, marginLeft: 6, color: 'var(--muted)', background: 'var(--border)', padding: '1px 5px', borderRadius: 8 }}>
+                      discipline
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {isEdit && !habits.length && !extraItems.length && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 8px', fontStyle: 'italic' }}>No {freq} goals yet</div>
+              )}
             </div>
           )
         }
@@ -291,32 +328,25 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
         return (
           <div key={cat.id} className="cat-card">
             <div className="cat-card-header">
-              <span className={`cat-badge badge-${cat.color}`}>
-                <EditableTitle
-                  value={cat.label}
-                  onSave={label => dispatch({ type: 'RENAME_CATEGORY', catId: cat.id, label })}
-                />
-              </span>
+              <span className={`cat-badge badge-${cat.color}`}>{cat.label}</span>
               <div className="cat-hdr-right">
                 <span className="pct-text">Daily: {pct}%</span>
+                {partnerGroup.length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                    👥 {partnerGroup.length}
+                  </span>
+                )}
                 <button className={`edit-btn${isEdit ? ' active' : ''}`}
                   onClick={() => setEditMode(p => ({ ...p, [cat.id]: !p[cat.id] }))}>
                   {isEdit ? '✓ Done' : '✏️ Edit'}
                 </button>
-                {isEdit && (
-                  <button
-                    onClick={() => { if (window.confirm(`Delete "${cat.label}" group and all its goals?`)) dispatch({ type: 'DELETE_CATEGORY', catId: cat.id }) }}
-                    style={{ background: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}
-                  >
-                    🗑️ Delete
-                  </button>
-                )}
               </div>
             </div>
+
             <div className="habit-grid-section">
-              {renderFreqSection('daily', daily)}
-              {renderFreqSection('weekly', weekly)}
-              {renderFreqSection('monthly', monthly)}
+              {renderFreqSection('daily', daily, catDisciplines.filter(d => d.freq === 'daily'))}
+              {renderFreqSection('weekly', weekly, catDisciplines.filter(d => d.freq === 'weekly'))}
+              {renderFreqSection('monthly', monthly, catDisciplines.filter(d => d.freq === 'monthly'))}
               {isEdit && (
                 <div className="add-habit-row">
                   <input className="add-habit-input" type="text" placeholder="Add a new goal..."
@@ -333,33 +363,110 @@ P.S. Once the weekly reminder is set up, you'll receive a progress summary for m
                 </div>
               )}
             </div>
+
+            {/* ── ACCOUNTABILITY PARTNER GROUP ── */}
             <div className="partner-section">
-              <div className="partner-lbl">Accountability Partner</div>
-              <div className="partner-form">
-                <div className="p-field">
-                  <label>Partner name</label>
-                  <input type="text" placeholder="e.g. John Kamau" defaultValue={p.name}
-                    onBlur={e => savePartner(cat.id, e.target.value, document.getElementById(`pe-${cat.id}`)?.value || p.email)}
-                    id={`pn-${cat.id}`} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <div className="partner-lbl">
+                  Accountability Group
+                  {partnerGroup.length > 0 && (
+                    <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--accent-light)', color: 'var(--accent)', padding: '1px 7px', borderRadius: 10, fontWeight: 600 }}>
+                      {partnerGroup.length} member{partnerGroup.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
                 </div>
-                <div className="p-field">
-                  <label>Gmail address</label>
-                  <input type="email" placeholder="partner@gmail.com" defaultValue={p.email}
-                    onBlur={e => savePartner(cat.id, document.getElementById(`pn-${cat.id}`)?.value || p.name, e.target.value)}
-                    id={`pe-${cat.id}`} />
-                </div>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                  <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0 }} onClick={() => sendIntroEmail(cat.id, cat.label)}>
-                    ✉️ Send Intro Email
-                  </button>
-                  <button className="cal-btn" style={{ flex: 1, margin: 0 }} onClick={() => scheduleReminder(cat.id, cat.label)}>
-                    📅 Set Weekly Reminder
-                  </button>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
-                  💡 <strong>Step 1:</strong> Send the intro email first. <strong>Step 2:</strong> Set the weekly reminder.
-                </p>
+                <button
+                  onClick={() => setShowPartnerGroup(p => ({ ...p, [cat.id]: !p[cat.id] }))}
+                  style={{ fontSize: 11, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                  {showGroup ? '▲ Hide' : '▼ Manage'}
+                </button>
               </div>
+
+              {/* Existing partner list */}
+              {partnerGroup.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                  {partnerGroup.map((p, idx) => (
+                    <div key={p.id} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '7px 10px', background: 'var(--surface)', borderRadius: 8,
+                      border: '1px solid var(--border)'
+                    }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-light)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 600, color: 'var(--accent)', flexShrink: 0
+                      }}>
+                        {(p.name || p.email || '?').charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.name || p.email}
+                        </div>
+                        {p.goal && (
+                          <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            Focus: {p.goal}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => removePartner(cat.id, p.id)}
+                        style={{ width: 22, height: 22, borderRadius: 5, border: 'none', background: 'var(--red-light)', color: 'var(--red)', cursor: 'pointer', fontSize: 13, flexShrink: 0 }}>
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add new partner form */}
+              {showGroup && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10, padding: '10px', background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted)', marginBottom: 2 }}>Add a partner to this group</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <input
+                      type="text" placeholder="Name (e.g. John Kamau)"
+                      value={newPartnerName[cat.id] || ''}
+                      onChange={e => setNewPartnerName(p => ({ ...p, [cat.id]: e.target.value }))}
+                      style={{ flex: 1, minWidth: 120, border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px', fontSize: 12, fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                    />
+                    <input
+                      type="email" placeholder="Gmail address"
+                      value={newPartnerEmail[cat.id] || ''}
+                      onChange={e => setNewPartnerEmail(p => ({ ...p, [cat.id]: e.target.value }))}
+                      style={{ flex: 1, minWidth: 150, border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px', fontSize: 12, fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                    />
+                  </div>
+                  <input
+                    type="text" placeholder="What is this partner helping you with? (optional)"
+                    value={newPartnerGoal[cat.id] || ''}
+                    onChange={e => setNewPartnerGoal(p => ({ ...p, [cat.id]: e.target.value }))}
+                    style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 10px', fontSize: 12, fontFamily: 'DM Sans, sans-serif', background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+                  />
+                  <button className="add-btn" onClick={() => addPartnerToGroup(cat.id)} style={{ alignSelf: 'flex-start' }}>
+                    + Add Partner
+                  </button>
+                </div>
+              )}
+
+              {/* Group actions */}
+              {partnerGroup.length > 0 && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="cal-btn" style={{ flex: 1, backgroundColor: '#10b981', margin: 0 }}
+                    onClick={() => sendGroupIntroEmail(cat.id, cat.label)}>
+                    ✉️ Email Group
+                  </button>
+                  <button className="cal-btn" style={{ flex: 1, margin: 0 }}
+                    onClick={() => scheduleGroupReminder(cat.id, cat.label)}>
+                    📅 Set Reminders
+                  </button>
+                </div>
+              )}
+
+              {partnerGroup.length === 0 && !showGroup && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                  No partners yet — click Manage to add your accountability group
+                </div>
+              )}
             </div>
           </div>
         )
